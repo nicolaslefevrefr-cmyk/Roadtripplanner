@@ -95,6 +95,13 @@ function toast(msg,type=''){
 }
 
 /* ===================================================
+   COLOR HELPERS
+=================================================== */
+function getDayColor(dayId){ const idx=S.days.findIndex(x=>x.id===dayId); if(idx<0) return null; const d=S.days[idx]; return d.color||DAY_ZONE_COLORS[idx%DAY_ZONE_COLORS.length]; }
+function getPoiColor(p){ if(p.colorLocked) return p.color; if(p.dayIds&&p.dayIds.length){ const c=getDayColor(p.dayIds[0]); if(c) return c; } return p.color; }
+function getRouteColor(r){ if(r.colorLocked) return r.color; if(r.dayId){ const c=getDayColor(r.dayId); if(c) return c; } return r.color||RCOL[r.mode]||'#1d56d4'; }
+
+/* ===================================================
    FINANCE
 =================================================== */
 function getFP(){ return { c: parseFloat(qs('#f-consump').value)||7, p: parseFloat(qs('#f-price').value)||1.70 }; }
@@ -113,84 +120,90 @@ function poiEffectiveCost(p){
 // Cost of a POI attributed to ONE specific day (for per-day cost rows)
 function poiCostForDay(p){
   const base = p.cost || 0;
-  // Whether total or perday, we show `base` per day (the user entered a per-day amount)
-  return base;
+  if(!base) return 0;
+  if(p.costType === 'perday') return base;
+  // total cost split equally across all days the POI spans
+  const nDays = (p.dayIds||[]).length || 1;
+  return +(base / nDays).toFixed(2);
 }
 
 function totalFuelCost(){ let t=0; S.routes.forEach(r=>t+=routeFuel(r)); return +t.toFixed(2); }
-function totalHotelCost(){ let t=0; S.pois.filter(p=>p.cat==='hotel'||p.cat==='camping').forEach(p=>t+=poiEffectiveCost(p)); return +t.toFixed(2); }
+function totalHotelCost(){ let t=0; S.pois.filter(p=>p.cat==='hotel').forEach(p=>t+=poiEffectiveCost(p)); return +t.toFixed(2); }
 function totalActivityCost(){ let t=0; S.pois.filter(p=>['attraction','hike','view','general','info'].includes(p.cat)).forEach(p=>t+=poiEffectiveCost(p)); return +t.toFixed(2); }
 function totalTransportFixed(){ let t=0; S.pois.filter(p=>p.cat==='gas'||p.cat==='parking').forEach(p=>t+=poiEffectiveCost(p)); S.routes.forEach(r=>t+=(r.fixedCost||0)); return +t.toFixed(2); }
+function totalEatingBudget(){ let t=0; S.days.forEach(d=>t+=eatingForDay(d.id)); return +t.toFixed(2); }
 function totalRestaurantPOI(){ let t=0; S.pois.filter(p=>p.cat==='restaurant').forEach(p=>t+=poiEffectiveCost(p)); return +t.toFixed(2); }
-function tripCost(){ return +(totalFuelCost()+totalHotelCost()+totalActivityCost()+totalTransportFixed()+totalDailyExpenses()+totalRestaurantPOI()).toFixed(2); }
+function tripCost(){ return +(totalFuelCost()+totalHotelCost()+totalActivityCost()+totalTransportFixed()+totalEatingBudget()+totalRestaurantPOI()).toFixed(2); }
 
+function eatingForDay(did){
+  const entry = S.eatingBudgets[did];
+  if(entry === undefined || entry === null) return S.eatingDefault;
+  return +entry;
+}
 function dayCost(d){
   let t=0;
   d.items.forEach(it=>{
     if(it.type==='route'){ const r=S.routes.find(x=>x.id===it.id); if(r) t+=routeCost(r); }
     if(it.type==='poi'){ const p=S.pois.find(x=>x.id===it.id); if(p) t+=poiCostForDay(p); }
   });
-  t += dayExpensesTotal(d.id);
+  t += eatingForDay(d.id);
   return +t.toFixed(2);
 }
 
 /* ===================================================
-   DAILY EXPENSES   (generalised per-category, per-day budget)
+   EATING BUDGET  (default + per-day override)
 =================================================== */
-function addDailyExpense(){
-  const name=prompt('Expense category name (e.g. 🚌 Transport):','');
-  if(!name||!name.trim()) return;
-  S.dailyExpenses.push({id:newExpId(), name:name.trim(), defaultPerDay:0});
-  renderDailyExpensesPanel(); updStats();
-}
-function removeDailyExpense(expId){
-  S.dailyExpenses=S.dailyExpenses.filter(e=>e.id!==expId);
-  // Clean up overrides
-  Object.keys(S.dailyExpenseOverrides).forEach(did=>{
-    delete (S.dailyExpenseOverrides[did]||{})[expId];
-  });
-  renderDailyExpensesPanel(); renderDays(); updStats();
-}
-function setExpenseDefault(expId, val){
-  const exp=S.dailyExpenses.find(e=>e.id===expId);
-  if(exp) exp.defaultPerDay=+val||0;
-  // Update placeholders on day inputs live
-  qsa('.day-exp-input[data-exp="'+expId+'"]').forEach(inp=>{
-    if(!inp.dataset.manual){ inp.placeholder='$'+(+val||0)+' (default)'; }
-  });
-  updStats();
-}
-function setDayExpenseOverride(did, expId, val, manual){
-  if(!S.dailyExpenseOverrides[did]) S.dailyExpenseOverrides[did]={};
-  if(manual) S.dailyExpenseOverrides[did][expId]=+val||0;
-  else delete S.dailyExpenseOverrides[did][expId];
-  updStats();
-}
-function renderDailyExpensesPanel(){
-  const el=qs('#daily-expenses-list'); if(!el) return;
-  if(!S.dailyExpenses.length){
-    el.innerHTML='<div style="font-size:.64rem;color:var(--muted);">No categories yet. Add one above.</div>';
-    qs('#daily-expenses-total').textContent='Total: $0.00';
-    return;
-  }
-  el.innerHTML=S.dailyExpenses.map(exp=>`
-    <div class="daily-exp-row">
-      <input class="inp daily-exp-name" value="${esc(exp.name)}" style="flex:1;min-width:0;"
-        onchange="S.dailyExpenses.find(e=>e.id==='${exp.id}').name=this.value;renderDays();">
-      <span style="font-size:.62rem;color:var(--muted);white-space:nowrap;">$/day</span>
-      <input type="number" class="inp" min="0" step="1" value="${exp.defaultPerDay||''}" placeholder="0"
-        style="width:70px;flex-shrink:0;"
-        oninput="setExpenseDefault('${exp.id}',+this.value)">
-      <button class="btn br bic bsm" onclick="removeDailyExpense('${exp.id}')" title="Remove">✕</button>
-    </div>`).join('');
-  const total=totalDailyExpenses();
-  const totalEl=qs('#daily-expenses-total');
-  if(totalEl) totalEl.innerHTML='Total: <b>$'+total.toFixed(2)+'</b> <span style="font-size:.6rem;color:var(--muted);">('+S.days.length+' day(s))</span>';
+// Apply default to days that haven't been manually set
+function applyEatingDefault(val){
+  S.eatingDefault = +val || 0;
+  refreshEatingUI();
 }
 
-// Keep backward-compat aliases used elsewhere
-function renderEatingBudgetRows(){ renderDailyExpensesPanel(); }
-function eatingForDay(did){ return dayExpensesTotal(did); }
-function totalEatingBudget(){ return totalDailyExpenses(); }
-function applyEatingDefault(){}   // no-op — kept so old HTML oninput doesn't break
-function setDayEating(){}         // no-op
+function setDayEating(did, val, manual){
+  if(manual){
+    S.eatingBudgets[did] = +val || 0;
+  } else {
+    delete S.eatingBudgets[did];
+  }
+  refreshEatingUI();
+}
+
+// Recompute + redraw everything that depends on eating costs (per-day totals/cost
+// rows in the Days tab, the eating total in Routes tab, and the grand total /
+// cost-breakdown modal), while preserving whatever input the user is currently
+// typing in (focus, cursor position, scroll) so re-rendering on every keystroke
+// doesn't interrupt them.
+function refreshEatingUI(){
+  const active = document.activeElement;
+  let restore = null;
+  if(active && active.classList && active.classList.contains('day-eating-input')){
+    restore = {type:'day', did:active.dataset.did, start:active.selectionStart, end:active.selectionEnd};
+  } else if(active && active.id === 'eating-default'){
+    restore = {type:'default', start:active.selectionStart, end:active.selectionEnd};
+  }
+  const dayList = qs('#day-list');
+  const scrollTop = dayList ? dayList.scrollTop : 0;
+
+  renderDays();             // recompute per-day 💰 totals + cost-summary rows
+  renderEatingBudgetRows();  // updates the total in routes tab
+  updStats();                // updates grand total + cost-breakdown modal
+
+  if(dayList) dayList.scrollTop = scrollTop;
+
+  if(restore){
+    const el = restore.type==='day' ? qs('.day-eating-input[data-did="'+restore.did+'"]') : qs('#eating-default');
+    if(el){
+      el.focus();
+      try{ el.setSelectionRange(restore.start, restore.end); }catch(e){ /* not supported on number inputs in some browsers */ }
+    }
+  }
+}
+
+function renderEatingBudgetRows(){
+  // Only sync the default input and the total line — per-day overrides live in the Days tab
+  const defEl = qs('#eating-default');
+  if(defEl && !defEl.matches(':focus')) defEl.value = S.eatingDefault || '';
+  const total = +(S.days.reduce((s,d)=>s+eatingForDay(d.id),0)).toFixed(2);
+  const totalEl = qs('#eating-total');
+  if(totalEl) totalEl.innerHTML='Total eating budget: <b>$'+total.toFixed(2)+'</b> <span style="font-size:.6rem;color:var(--muted);">('+S.days.length+' days × default + custom overrides)</span>';
+}

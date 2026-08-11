@@ -1,7 +1,7 @@
 /* =========================================================
-   RoadTrip Planner — app.js  v8.3.0
+   RoadTrip Planner — config.js  v8.10.2
    ========================================================= */
-const APP_VERSION = '8.3.0';
+const APP_VERSION = '8.11.0';
 const GOOGLE_CLIENT_ID = '940235006674-1mfg6a2qn7hkqu78irn2af34a507i76u.apps.googleusercontent.com';
 const DRIVE_FOLDER = 'RoadTripPlanner';
 
@@ -14,7 +14,7 @@ const DAY_ZONE_COLORS = [
    SETTINGS / CONFIG  (persisted to localStorage)
 =================================================== */
 const CFG_DEFAULTS = {
-  showDayZones:      false,
+  showDayZones:      true,
   showZoneTitles:    true,
   showPoiLabels:     false,
   showHourDots:      true,
@@ -22,7 +22,14 @@ const CFG_DEFAULTS = {
   fontScale:         125,
   darkMode:          false,
 };
-let CFG = Object.assign({}, CFG_DEFAULTS, JSON.parse(localStorage.getItem('rtp_cfg')||'{}'));
+const _storedCfg = JSON.parse(localStorage.getItem('rtp_cfg') || '{}');
+// Migration v8.5.0: showDayZones default changed false→true; clear cached false so new default applies
+if (_storedCfg.showDayZones === false && !_storedCfg._v850) {
+  delete _storedCfg.showDayZones;
+  _storedCfg._v850 = 1;
+  localStorage.setItem('rtp_cfg', JSON.stringify(_storedCfg));
+}
+let CFG = Object.assign({}, CFG_DEFAULTS, _storedCfg);
 
 function saveCFG(){ localStorage.setItem('rtp_cfg', JSON.stringify(CFG)); }
 
@@ -89,21 +96,22 @@ function nid(){ return ++_id; }
 const S = {
   pois:[], routes:[], days:[],
   rtCol:'#1d56d4', rtCol2:'#1d56d4',
-  col:'#c94f14', editing:null, placing:false, pendLL:null,
+  col:'#c94f14', editing:null, placing:false, pendLL:null, routeDep:null,
   drawerWasOpen:false,
   gps:false, watchId:null, gposLL:null, gpsMk:null,
   sat:false, fcat:'all', editRid:null,
   drawLines:false, poiLines:[],
   gd:{token:null,user:null,folderId:null},
+  // Eating budgets: dayId -> {value, manual}
+  // manual=true means user explicitly set it (don't overwrite with default change)
+  eatingBudgets:{},   // dayId -> number (explicitly set)
+  eatingDefault: 0,
   costType: 'total',
   dayVisibility: {},  // dayId -> bool (false=hidden)
+  dayCollapsed: {},   // dayId -> bool (true=collapsed)
   dayOrderLines: [],  // Leaflet polyline objects for POI-order lines
   poiVisibility: {},  // poiId -> false=hidden, true=force-show, undefined=default
-  allPOIsHidden: false,
-  // Daily expense categories — each has {id, name, defaultPerDay}
-  // Per-day overrides stored in dailyExpenseOverrides[dayId][expId]
-  dailyExpenses: [],
-  dailyExpenseOverrides: {},  // { dayId: { expId: number } }  — only explicitly set values
+  allPOIsHidden: false, // global "hide all POIs" flag
 };
 
 const CATS={general:'📍',hotel:'🏨',camping:'⛺',restaurant:'🍽️',attraction:'🎯',hike:'🥾',view:'🌄',gas:'⛽',parking:'🅿️',info:'ℹ️'};
@@ -111,34 +119,8 @@ const RCOL={car:'#1d56d4',foot:'#15803d',bike:'#d4920a',manual:'#9333ea'};
 const MI={car:'🚗',foot:'🚶',bike:'🚲',manual:'✏️'};
 const PC={};
 
-// Default expense categories — user can add/remove/rename
-const DEFAULT_DAILY_EXPENSES = [
-  {id:'exp_eating', name:'🍽️ Eating',   defaultPerDay:0},
-  {id:'exp_gas',    name:'⛽ Gas',       defaultPerDay:0},
-  {id:'exp_misc',   name:'💳 Misc',      defaultPerDay:0},
-];
-let _expIdCounter = 1;
-function newExpId(){ return 'exp_'+Date.now()+'_'+(++_expIdCounter); }
-
-/** Get the effective value for an expense on a given day (override > default) */
-function getDayExpense(did, expId){
-  const ovr = S.dailyExpenseOverrides[did];
-  if(ovr && ovr[expId] !== undefined) return +ovr[expId];
-  const exp = S.dailyExpenses.find(e=>e.id===expId);
-  return exp ? +(exp.defaultPerDay||0) : 0;
+function fmtDate(s){
+  if(!s) return '';
+  try{ const d=new Date(s+'T12:00:00'); return d.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'}); }
+  catch(e){ return s; }
 }
-
-/** Total of all daily expenses across all days */
-function totalDailyExpenses(){
-  let t=0;
-  S.days.forEach(d=>{
-    S.dailyExpenses.forEach(exp=>{ t+=getDayExpense(d.id, exp.id); });
-  });
-  return +t.toFixed(2);
-}
-
-/** Total daily expenses for one day */
-function dayExpensesTotal(did){
-  return +S.dailyExpenses.reduce((s,exp)=>s+getDayExpense(did,exp.id),0).toFixed(2);
-}
-

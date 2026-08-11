@@ -1,207 +1,109 @@
-
 /* ===================================================
    DAY ZONE OVERLAY  — rendered inside a Leaflet custom pane
    Pane z-index 250 = above tiles(200), below overlays(400), markers(600), popups(700)
 =================================================== */
 
-// Create a dedicated Leaflet pane for day zones
 map.createPane('dayZonePane');
 map.getPane('dayZonePane').style.zIndex = 250;
 map.getPane('dayZonePane').style.pointerEvents = 'none';
 
-// We'll draw into a single <svg> element appended to the pane
 let _zoneSvg = null;
+function _resizeZoneSvg(){
+  if(!_zoneSvg) return;
+  const c = map.getContainer();
+  _zoneSvg.setAttribute('width', c.clientWidth);
+  _zoneSvg.setAttribute('height', c.clientHeight);
+}
 function getZoneSvg(){
   if(!_zoneSvg){
     _zoneSvg = document.createElementNS('http://www.w3.org/2000/svg','svg');
-    _zoneSvg.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible;pointer-events:none;';
+    _zoneSvg.style.cssText='position:absolute;top:0;left:0;overflow:visible;pointer-events:none;';
     map.getPane('dayZonePane').appendChild(_zoneSvg);
+    _resizeZoneSvg();
+    map.on('resize', _resizeZoneSvg);
   }
   return _zoneSvg;
 }
 
-// latlngToPixel: use Leaflet's layerPointToContainerPoint so coords are
-// relative to the pane's top-left (which tracks map pan automatically
-// via Leaflet's CSS translate on the pane).
-// We use layerPoint so the SVG moves with the map without needing a full redraw on pan.
-// On moveend/zoomend we do a full redraw anyway.
 function latlngToPixel(ll){
   const lp = map.latLngToLayerPoint(L.latLng(ll[0], ll[1]));
   return [lp.x, lp.y];
 }
 
-/* --- Ellipse zone geometry --- */
-
-// Convert [lat,lng] to approximate metres from origin (for PCA normalization)
-// Uses equirectangular projection centered on the centroid
-function latlngToMetres(pts){
-  const cLat=pts.reduce((s,p)=>s+p[0],0)/pts.length;
-  const cLng=pts.reduce((s,p)=>s+p[1],0)/pts.length;
-  const cosLat=Math.cos(cLat*Math.PI/180)||1;
-  return pts.map(([lat,lng])=>[
-    (lng-cLng)*111320*cosLat,  // x in metres
-    (lat-cLat)*111320          // y in metres
-  ]);
-}
-
-// Fit minimum bounding ellipse using PCA in metre-space.
-// Returns {cx_lat, cx_lng, aMet, bMet, angleMet}
-// where aMet/bMet are semi-axes in metres, angleMet is the rotation angle in metre-space.
-function fitEllipseGeo(pts){
+/* --- Convex Hull (Graham scan) in 2D --- */
+function _cross(O,A,B){ return (A[0]-O[0])*(B[1]-O[1])-(A[1]-O[1])*(B[0]-O[0]); }
+function convexHull(pts){
   const n=pts.length;
-  const cLat=pts.reduce((s,p)=>s+p[0],0)/n;
-  const cLng=pts.reduce((s,p)=>s+p[1],0)/n;
-  const cosLat=Math.cos(cLat*Math.PI/180)||1;
-
-  // Convert to metres centred at centroid
-  const mpts=pts.map(([lat,lng])=>[
-    (lng-cLng)*111320*cosLat,
-    (lat-cLat)*111320
-  ]);
-  let sxx=0,sxy=0,syy=0;
-  for(const [x,y] of mpts){ sxx+=x*x; sxy+=x*y; syy+=y*y; }
-  sxx/=n; sxy/=n; syy/=n;
-  const trace=sxx+syy, disc=Math.sqrt(Math.max(0,(sxx-syy)**2/4+sxy**2));
-  const l1=trace/2+disc;
-  // Angle of major axis in metre-space
-  let angleMet=0;
-  if(Math.abs(sxy)>1e-6||Math.abs(sxx-syy)>1e-6) angleMet=Math.atan2(2*sxy, sxx-syy)/2;
-  const cos=Math.cos(angleMet), sin=Math.sin(angleMet);
-  let aMet=0, bMet=0;
-  for(const [x,y] of mpts){
-    const u= x*cos+y*sin;
-    const v=-x*sin+y*cos;
-    aMet=Math.max(aMet,Math.abs(u));
-    bMet=Math.max(bMet,Math.abs(v));
-  }
-  return {cLat,cLng,aMet,bMet,angleMet,cosLat};
+  if(n<2) return pts.slice();
+  const sorted=pts.slice().sort((a,b)=>a[0]!==b[0]?a[0]-b[0]:a[1]-b[1]);
+  const lower=[];
+  for(const p of sorted){ while(lower.length>=2&&_cross(lower[lower.length-2],lower[lower.length-1],p)<=0) lower.pop(); lower.push(p); }
+  const upper=[];
+  for(let i=sorted.length-1;i>=0;i--){ const p=sorted[i]; while(upper.length>=2&&_cross(upper[upper.length-2],upper[upper.length-1],p)<=0) upper.pop(); upper.push(p); }
+  upper.pop(); lower.pop();
+  return lower.concat(upper);
 }
 
-// Sample N points around a geo ellipse described in metre-space, projected to pixels.
-// angleMet is measured in the (x=lng*cosLat*111320, y=lat*111320) plane.
-function geoEllipseAsPixels(cLat, cLng, aMet, bMet, angleMet, cosLat, N=64){
-  const cos=Math.cos(angleMet), sin=Math.sin(angleMet);
-  const pts=[];
-  for(let i=0;i<N;i++){
-    const t=2*Math.PI*i/N;
-    // Point on unrotated ellipse in metres
-    const u=aMet*Math.cos(t), v=bMet*Math.sin(t);
-    // Rotate in metre-space
-    const mx= u*cos-v*sin;   // metres east
-    const my= u*sin+v*cos;   // metres north
-    // Back to lat/lng
-    const lat=cLat+my/111320;
-    const lng=cLng+mx/(111320*cosLat);
-    pts.push(latlngToPixel([lat,lng]));
-  }
-  return pts;
-}
-
-// Wobble in pixels after projection (small, hand-drawn feel)
-function wobbleEllipse(pts, seed){
-  let r=seed*9301+49297;
-  return pts.map(([x,y])=>{
-    r=(r*9301+49297)%233280; const rx=(r/233280-.5)*6;
-    r=(r*9301+49297)%233280; const ry=(r/233280-.5)*6;
-    return [x+rx, y+ry];
+/* Expand hull outward by `pad` pixels from centroid */
+function expandHull(hull, pad){
+  if(!hull.length) return hull;
+  const cx=hull.reduce((s,p)=>s+p[0],0)/hull.length;
+  const cy=hull.reduce((s,p)=>s+p[1],0)/hull.length;
+  return hull.map(([x,y])=>{
+    const dx=x-cx, dy=y-cy, d=Math.sqrt(dx*dx+dy*dy)||1;
+    return [x+dx/d*pad, y+dy/d*pad];
   });
 }
 
-// Convert point array → smooth SVG path (1 Chaikin pass, very gentle)
-function ellipseToPath(pts){
-  const n=pts.length, s=[];
-  for(let i=0;i<n;i++){
-    const a=pts[i], b=pts[(i+1)%n];
-    s.push([0.75*a[0]+0.25*b[0], 0.75*a[1]+0.25*b[1]]);
-    s.push([0.25*a[0]+0.75*b[0], 0.25*a[1]+0.75*b[1]]);
+/* Chaikin corner-cutting smoothing */
+function chaikin(pts, passes=2){
+  let cur=pts;
+  for(let p=0;p<passes;p++){
+    const next=[], n=cur.length;
+    for(let i=0;i<n;i++){
+      const a=cur[i], b=cur[(i+1)%n];
+      next.push([0.75*a[0]+0.25*b[0], 0.75*a[1]+0.25*b[1]]);
+      next.push([0.25*a[0]+0.75*b[0], 0.25*a[1]+0.75*b[1]]);
+    }
+    cur=next;
   }
-  return 'M'+s[0][0]+','+s[0][1]+s.slice(1).map(([x,y])=>' L'+x+','+y).join('')+' Z';
+  return cur;
 }
 
-// Ray-casting point-in-polygon
-function pointInPolygon([px,py], poly){
-  let inside=false;
-  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
-    const [xi,yi]=poly[i],[xj,yj]=poly[j];
-    if(((yi>py)!==(yj>py))&&(px<(xj-xi)*(py-yi)/(yj-yi)+xi)) inside=!inside;
-  }
-  return inside;
+function ptsToPath(pts){
+  if(!pts.length) return '';
+  return 'M'+pts[0][0]+','+pts[0][1]+pts.slice(1).map(([x,y])=>' L'+x+','+y).join('')+' Z';
 }
 
-const ELLIPSE_PAD_METRES = 3500;   // base padding around outermost point
-const ELLIPSE_EXTRA_METRES = 1500; // extra per retry if POI falls outside
+/* Circle path around a single pixel point, with radius in pixels */
+function circlePath(cx, cy, r, n=48){
+  const pts=[];
+  for(let i=0;i<n;i++){ const t=2*Math.PI*i/n; pts.push([cx+r*Math.cos(t),cy+r*Math.sin(t)]); }
+  return ptsToPath(pts);
+}
 
-/**
- * Build day-zone path.
- * Key design:
- *  - Ellipse is FITTED and ORIENTED using ONLY poiGeoPts (the POIs).
- *    This ensures the major axis aligns with the POI distribution, not route wiggles.
- *  - allGeoPts (POIs + route samples) are used ONLY in the containment check,
- *    so the ellipse also covers the route path if needed (may expand on retry).
- *  - Everything is done in metre-space for correct orientation.
- */
-function buildDayPath(allGeoPts, poiGeoPts, seed){
-  if(!allGeoPts.length) return '';
-
-  // Use POIs for fitting; fall back to all points if no POIs
-  const fitPts = poiGeoPts.length ? poiGeoPts : allGeoPts;
-
-  // Single point: circle
-  if(fitPts.length===1){
-    const [lat,lng]=fitPts[0];
-    const cosLat=Math.cos(lat*Math.PI/180)||1;
-    const rLat=ELLIPSE_PAD_METRES/111320;
-    const rLng=ELLIPSE_PAD_METRES/(111320*cosLat);
-    const pts=[];
-    for(let i=0;i<48;i++){const t=2*Math.PI*i/48; pts.push(latlngToPixel([lat+rLat*Math.cos(t),lng+rLng*Math.sin(t)]));}
-    return ellipseToPath(wobbleEllipse(pts,seed));
+/* Stadium/capsule shape around two pixel points */
+function capsulePath(A, B, r, n=16){
+  const dx=B[0]-A[0], dy=B[1]-A[1], len=Math.sqrt(dx*dx+dy*dy)||1;
+  const ux=dx/len, uy=dy/len;   // unit along AB
+  const nx=-uy, ny=ux;           // unit normal
+  const pts=[];
+  for(let i=0;i<=n;i++){          // semicircle around B
+    const a=Math.PI/2 - Math.PI*i/n;
+    pts.push([B[0]+r*(ux*Math.cos(a)-ny*Math.sin(a)), B[1]+r*(uy*Math.cos(a)+nx*Math.sin(a))]);
   }
-
-  // Two points: special case — thin ellipse aligned exactly between the two points
-  if(fitPts.length===2){
-    const [p0,p1]=fitPts;
-    const cosLat=Math.cos((p0[0]+p1[0])/2*Math.PI/180)||1;
-    // midpoint
-    const cLat=(p0[0]+p1[0])/2, cLng=(p0[1]+p1[1])/2;
-    // distance in metres
-    const dx=(p1[1]-p0[1])*111320*cosLat, dy=(p1[0]-p0[0])*111320;
-    const halfDist=Math.sqrt(dx*dx+dy*dy)/2;
-    const angleMet=Math.atan2(dy,dx);
-    // Force major axis = distance/2 + pad, minor axis = pad only
-    const aMet=halfDist+ELLIPSE_PAD_METRES;
-    const bMet=ELLIPSE_PAD_METRES*0.6; // flatter to indicate direction
-    const perim=geoEllipseAsPixels(cLat,cLng,aMet,bMet,angleMet,cosLat,60);
-    return ellipseToPath(wobbleEllipse(perim,seed));
+  for(let i=0;i<=n;i++){          // semicircle around A
+    const a=-Math.PI/2 - Math.PI*i/n;
+    pts.push([A[0]+r*(ux*Math.cos(a)-ny*Math.sin(a)), A[1]+r*(uy*Math.cos(a)+nx*Math.sin(a))]);
   }
+  return ptsToPath(chaikin(pts,1));
+}
 
-  // General case: fit to POIs, then expand to contain allGeoPts
-  const {cLat,cLng,aMet:rawA,bMet:rawB,angleMet,cosLat}=fitEllipseGeo(fitPts);
-
-  // All points that MUST be inside (POIs + route endpoints)
-  // Route midpoints we don't require containment for — only endpoints
-  const mustContainPx=[...allGeoPts.map(latlngToPixel)];
-
-  for(let attempt=0;attempt<4;attempt++){
-    const extra=attempt*ELLIPSE_EXTRA_METRES;
-    const pad=ELLIPSE_PAD_METRES+extra;
-    const aMet=Math.max(rawA+pad, pad);
-    const bMet=Math.max(rawB+pad*0.6, pad*0.6); // minor axis gets slightly less pad for elongated shape
-
-    const perim=geoEllipseAsPixels(cLat,cLng,aMet,bMet,angleMet,cosLat,64);
-    const wobbled=wobbleEllipse(perim,seed);
-    const pathD=ellipseToPath(wobbled);
-
-    // Parse path to polygon for containment check
-    const poly=pathD.replace(/[MLZ]/g,' ').trim().split(/\s+/).reduce((acc,_,i,arr)=>{
-      if(i%2===0){const x=parseFloat(arr[i]),y=parseFloat(arr[i+1]);if(!isNaN(x)&&!isNaN(y))acc.push([x,y]);}return acc;
-    },[]);
-
-    // Check only POI pixels must be inside (not every route point)
-    const poiPx=poiGeoPts.map(latlngToPixel);
-    const allIn=poiPx.every(pt=>pointInPolygon(pt,poly));
-    if(allIn||attempt===3) return pathD;
-  }
-  return '';
+/* Minimum pixel padding — scales with zoom so zones are always readable */
+function minPadPx(){
+  // Base 30px at zoom 10, grows slightly at lower zoom
+  const z=map.getZoom();
+  return Math.max(28, 28+(10-z)*4);
 }
 
 /* --- Debounced rAF zone refresh --- */
@@ -213,6 +115,7 @@ map.on('zoomstart', ()=>{ if(CFG.showDayZones){ const svg=getZoneSvg(); svg.styl
 map.on('zoom',      ()=>{ if(CFG.showDayZones){ const svg=getZoneSvg(); svg.style.display='none'; } });
 map.on('moveend',   scheduleZoneRefresh);
 map.on('zoomend',   scheduleZoneRefresh);
+map.on('viewreset', scheduleZoneRefresh);
 
 function scheduleZoneRefresh(){
   if(_dzRafId) cancelAnimationFrame(_dzRafId);
@@ -230,96 +133,123 @@ function refreshDayZones(){
   const ns = 'http://www.w3.org/2000/svg';
   const container = map.getContainer();
   const W = container.clientWidth, H = container.clientHeight;
+  const margin = 400;
+  const pad = minPadPx();
 
   S.days.forEach((d, di) => {
     if(isDayHidden(d.id)) return;
 
-    // Collect geo points.
-    // poiGeoPts = ALL POIs that belong to this day (direct items + route endpoints)
-    //             These drive the ellipse fit and MUST be inside.
-    // routeGeoPts = sampled route coordinates (used to expand ellipse if needed, not for fitting)
-    const poiIdsSeen = new Set();
-    const poiGeoPts = [];  // drives ellipse fit AND must-be-inside check
-    d.items.forEach(it => {
-      if(it.type==='poi'){
-        const p=S.pois.find(x=>x.id===it.id);
-        if(p && !poiIdsSeen.has(p.id)){ poiIdsSeen.add(p.id); poiGeoPts.push([p.lat,p.lng]); }
-      }
-      if(it.type==='route'){
-        const r=S.routes.find(x=>x.id===it.id);
-        if(r){
-          // Route endpoints
-          [r.fromId,r.toId].forEach(pid=>{
-            if(!poiIdsSeen.has(pid)){
-              const ep=S.pois.find(x=>x.id===pid);
-              if(ep){ poiIdsSeen.add(pid); poiGeoPts.push([ep.lat,ep.lng]); }
-            }
-          });
-          // 10 evenly-spaced samples along the route path — these act as "fake POIs"
-          // so the ellipse orientation and size follows the actual road, not just endpoints
-          if(r.coords && r.coords.length>2){
-            const n=Math.min(10, r.coords.length);
-            for(let i=0;i<n;i++){
-              const idx=Math.round(i*(r.coords.length-1)/(n-1));
-              poiGeoPts.push(r.coords[idx]);
-            }
-          }
-        }
-      }
-    });
-    const allGeoPts=poiGeoPts; // all points are now used for fitting
-    if(!allGeoPts.length) return;
+    // Collect all geo points for this day:
+    // 1. All POIs assigned to this day (via dayIds — robust even if d.items is stale)
+    // 2. Route endpoints and dense coordinate samples
+    const seen=new Set();
+    const poiPts=[];   // POI-only points (for centroid label)
+    const allPts=[];   // POI + route points (for hull)
 
-    const margin=600;
-    const anyVisible=allGeoPts.some(geo=>{
-      const [x,y]=latlngToPixel(geo);
-      return x>-margin && x<W+margin && y>-margin && y<H+margin;
+    function addGeo(lat, lng, isPoi){
+      const k=lat.toFixed(4)+','+lng.toFixed(4);
+      if(seen.has(k)) return;
+      seen.add(k);
+      if(isPoi) poiPts.push([lat,lng]);
+      allPts.push([lat,lng]);
+    }
+    function addRouteGeo(r){
+      [r.fromId,r.toId].forEach(pid=>{ const ep=S.pois.find(x=>x.id===pid); if(ep) addGeo(ep.lat,ep.lng,false); });
+      if(r.coords&&r.coords.length>1){
+        const step=Math.max(1,Math.floor(r.coords.length/60));
+        for(let i=0;i<r.coords.length;i+=step) addGeo(r.coords[i][0],r.coords[i][1],false);
+        addGeo(r.coords[r.coords.length-1][0],r.coords[r.coords.length-1][1],false);
+      }
+    }
+
+    // Primary: POIs whose dayIds include this day
+    S.pois.forEach(p=>{
+      if((p.dayIds||[]).includes(d.id)) addGeo(p.lat,p.lng,true);
     });
+
+    // Ghost accommodation POIs (hotel from previous day propagated into this day)
+    getGhostItemsForDay(di).forEach(g=>{
+      const p=S.pois.find(x=>x.id===g.poiId);
+      if(p) addGeo(p.lat,p.lng,true);
+    });
+
+    // Routes assigned to this day (r.dayId is the authoritative source)
+    // Also fall back to d.items for routes that may lack dayId
+    const routeIds=new Set();
+    S.routes.filter(r=>r.dayId===d.id).forEach(r=>{ routeIds.add(r.id); addRouteGeo(r); });
+    d.items.forEach(it=>{ if(it.type==='route'&&!routeIds.has(it.id)){ const r=S.routes.find(x=>x.id===it.id); if(r) addRouteGeo(r); } });
+
+    if(!allPts.length) return;
+
+    // Convert to pixel coords
+    const pxAll  = allPts.map(g=>latlngToPixel(g));
+    const pxPois = poiPts.map(g=>latlngToPixel(g));
+
+    // Cull days entirely off-screen
+    const anyVisible = pxAll.some(([x,y])=>x>-margin&&x<W+margin&&y>-margin&&y<H+margin);
     if(!anyVisible) return;
 
-    const color=DAY_ZONE_COLORS[di%DAY_ZONE_COLORS.length];
-    const [r2,g2,b2]=[parseInt(color.slice(1,3),16),parseInt(color.slice(3,5),16),parseInt(color.slice(5,7),16)];
-    const rgba=a=>`rgba(${r2},${g2},${b2},${a})`;
-
-    // Build geo-invariant ellipse path
-    const pathD=buildDayPath(allGeoPts, poiGeoPts, di+1);
+    // Build zone shape
+    let pathD;
+    if(pxAll.length===1){
+      pathD = circlePath(pxAll[0][0], pxAll[0][1], pad);
+    } else if(pxAll.length===2){
+      pathD = capsulePath(pxAll[0], pxAll[1], pad);
+    } else {
+      const hull = convexHull(pxAll);
+      // Ensure hull has at least 3 unique points for a valid polygon
+      if(hull.length<3){
+        pathD = hull.length===2
+          ? capsulePath(hull[0],hull[1],pad)
+          : circlePath(hull[0][0],hull[0][1],pad);
+      } else {
+        // Smooth first, then expand — Chaikin pulls corners inward so expand last
+        // ensures the final shape always fully contains the original POI positions
+        pathD = ptsToPath(expandHull(chaikin(hull, 2), pad));
+      }
+    }
     if(!pathD) return;
+
+    const color=d.color||DAY_ZONE_COLORS[di%DAY_ZONE_COLORS.length];
+    const [rv,gv,bv]=[parseInt(color.slice(1,3),16),parseInt(color.slice(3,5),16),parseInt(color.slice(5,7),16)];
+    const rgba=a=>`rgba(${rv},${gv},${bv},${a})`;
 
     // Blur filter
     const fid='blur-d'+di;
     const defs=document.createElementNS(ns,'defs');
     const filter=document.createElementNS(ns,'filter');
-    filter.setAttribute('id',fid); filter.setAttribute('x','-40%'); filter.setAttribute('y','-40%');
-    filter.setAttribute('width','180%'); filter.setAttribute('height','180%');
-    const feG=document.createElementNS(ns,'feGaussianBlur'); feG.setAttribute('stdDeviation','10');
+    filter.setAttribute('id',fid); filter.setAttribute('x','-30%'); filter.setAttribute('y','-30%');
+    filter.setAttribute('width','160%'); filter.setAttribute('height','160%');
+    const feG=document.createElementNS(ns,'feGaussianBlur'); feG.setAttribute('stdDeviation','7');
     filter.appendChild(feG); defs.appendChild(filter); svgEl.appendChild(defs);
 
     // Soft fill
     const fill=document.createElementNS(ns,'path');
-    fill.setAttribute('d',pathD); fill.setAttribute('fill',rgba(0.14));
+    fill.setAttribute('d',pathD); fill.setAttribute('fill',rgba(0.13));
     fill.setAttribute('filter',`url(#${fid})`);
     svgEl.appendChild(fill);
 
     // Dashed stroke
     const stroke=document.createElementNS(ns,'path');
-    stroke.setAttribute('d',pathD); stroke.setAttribute('fill',rgba(0.07));
-    stroke.setAttribute('stroke',rgba(0.7)); stroke.setAttribute('stroke-width','2.5');
-    stroke.setAttribute('stroke-dasharray','10 5');
+    stroke.setAttribute('d',pathD); stroke.setAttribute('fill',rgba(0.06));
+    stroke.setAttribute('stroke',rgba(0.65)); stroke.setAttribute('stroke-width','2');
+    stroke.setAttribute('stroke-dasharray','8 5');
     stroke.setAttribute('stroke-linecap','round'); stroke.setAttribute('stroke-linejoin','round');
     svgEl.appendChild(stroke);
 
-    // Day title — at the CENTROID of all geo points, projected to pixels
+    // Zone title at centroid of POI points (or all points if no POI centroids)
     if(CFG.showZoneTitles){
-      const centLat=allGeoPts.reduce((s,p)=>s+p[0],0)/allGeoPts.length;
-      const centLng=allGeoPts.reduce((s,p)=>s+p[1],0)/allGeoPts.length;
-      const [centX,centY]=latlngToPixel([centLat,centLng]);
-      const title=(d.title||('Day '+(di+1)))+(d.date?' · '+d.date:'');
+      const centSrc = pxPois.length ? pxPois : pxAll;
+      const centX=centSrc.reduce((s,p)=>s+p[0],0)/centSrc.length;
+      const centY=centSrc.reduce((s,p)=>s+p[1],0)/centSrc.length;
+      const fd=fmtDate(d.date);
+      const title=(d.title||('Day '+(di+1)))+(fd?' · '+fd:'');
       const lbl=document.createElementNS(ns,'text');
       lbl.setAttribute('x',centX); lbl.setAttribute('y',centY);
       lbl.setAttribute('text-anchor','middle'); lbl.setAttribute('dominant-baseline','middle');
       lbl.setAttribute('font-size','13'); lbl.setAttribute('font-weight','800');
       lbl.setAttribute('font-family','Nunito,sans-serif');
-      lbl.setAttribute('fill',rgba(0.92));
+      lbl.setAttribute('fill',rgba(0.9));
       lbl.setAttribute('paint-order','stroke');
       lbl.setAttribute('stroke','rgba(255,255,255,0.9)');
       lbl.setAttribute('stroke-width','4');
@@ -329,4 +259,3 @@ function refreshDayZones(){
     }
   });
 }
-

@@ -10,9 +10,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="RoadTrip">
-<link rel="manifest" href="manifest.json">
-<link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22RoadTrip%20Planner%22%7D">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗺️</text></svg>">
 <title>RoadTrip Planner</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -108,6 +107,9 @@
         <button class="btn bg bic bsm" onclick="setAllPOIsVisibility(true)" title="Show all POIs" style="font-size:.8rem;">👁</button>
         <button class="btn bg bic bsm" onclick="setAllPOIsVisibility(false)" title="Hide all POIs" style="font-size:.8rem;">👁‍🗨</button>
       </div>
+      <div style="display:flex;gap:5px;margin-bottom:5px;align-items:center;">
+        <button class="btn bg bsm" id="btn-hide-unused" onclick="toggleHideUnusedPOIs()" style="flex:1;font-size:.7rem;">👁 Hide unassigned POIs</button>
+      </div>
       <div class="sec"><span>Backlog</span><span class="badge" id="pcnt">0</span><span class="sl"></span></div>
       <div id="poi-list"></div>
     </div>
@@ -117,9 +119,10 @@
   <div class="panel" id="panel-days">
     <div style="padding:8px 10px;border-bottom:1px solid var(--border);flex-shrink:0;display:flex;gap:5px;align-items:center;">
       <button class="btn ba bsm" id="btn-addd" style="flex:1;">+ Add Day</button>
-      <button class="btn bg bsm" id="btn-shift-dates">&#x1F4C5; Shift dates</button>
       <button class="btn bg bic bsm" id="btn-days-show-all" onclick="setAllDaysVisibility(true)" title="Show all days" style="font-size:.85rem;">👁</button>
       <button class="btn bg bic bsm" id="btn-days-hide-all" onclick="setAllDaysVisibility(false)" title="Hide all days" style="font-size:.85rem;">👁‍🗨</button>
+      <button class="btn bg bic bsm" onclick="setAllDaysCollapsed(false)" title="Expand all days" style="font-size:.82rem;font-weight:700;">+</button>
+      <button class="btn bg bic bsm" onclick="setAllDaysCollapsed(true)" title="Collapse all days" style="font-size:.82rem;font-weight:700;">−</button>
     </div>
     <div class="pbd" id="day-list"></div>
   </div>
@@ -139,16 +142,18 @@
           <div class="finance-total" id="finance-total-rt">⛽ Total fuel cost: <b>$0.00</b></div>
         </div>
       </details>
-      <!-- Daily Expenses (generalised per-category daily budget) -->
-      <details class="daily-expenses-box" id="daily-expenses-details">
-        <summary>Daily Expenses</summary>
-        <div class="daily-expenses-inner">
+      <!-- Eating budget -->
+      <details class="resto-box" id="resto-details">
+        <summary>Eating Budget</summary>
+        <div class="resto-inner">
           <div style="font-size:.64rem;color:var(--muted);margin-bottom:8px;line-height:1.65;">
-            Define <b>expense categories</b> (eating, gas, parking…) with a default amount per day. Override any individual day directly in the Days tab.
+            Set a <b>default daily eating budget</b> applied to every day. You can override it per-day in the Days tab.
           </div>
-          <div id="daily-expenses-list"></div>
-          <button class="btn bg bsm bfw" onclick="addDailyExpense()" style="margin-top:4px;">＋ Add category</button>
-          <div class="daily-expenses-total" id="daily-expenses-total">Total: <b>$0.00</b></div>
+          <div class="fld">
+            <label class="lbl">Default per day ($)</label>
+            <input class="inp" id="eating-default" type="number" min="0" step="1" placeholder="0" oninput="applyEatingDefault(+this.value)">
+          </div>
+          <div class="resto-total" id="eating-total">Total eating budget: <b>$0.00</b></div>
         </div>
       </details>
       <!-- New route -->
@@ -174,7 +179,7 @@
         <div class="fld">
           <label class="lbl">Route color</label>
           <div class="crow" id="rt-colors" style="margin-top:4px;">
-            <div class="csw on" style="background:#1d56d4" data-rc="#1d56d4"></div>
+            <div class="csw" style="background:#1d56d4" data-rc="#1d56d4"></div>
             <div class="csw" style="background:#15803d" data-rc="#15803d"></div>
             <div class="csw" style="background:#d4920a" data-rc="#d4920a"></div>
             <div class="csw" style="background:#c81e1e" data-rc="#c81e1e"></div>
@@ -182,6 +187,7 @@
             <div class="csw" style="background:#0e7eb5" data-rc="#0e7eb5"></div>
             <div class="csw" style="background:#b01e6a" data-rc="#b01e6a"></div>
             <div class="csw" style="background:#c94f14" data-rc="#c94f14"></div>
+            <button class="btn bg bsm" onclick="selRtColAuto()" title="Auto-color from assigned day" style="font-size:.63rem;padding:2px 6px;white-space:nowrap;">↩ Auto</button>
           </div>
         </div>
         <button class="btn bb bfw" id="btn-calc">Calculate Route →</button>
@@ -238,7 +244,7 @@
               <li>console.cloud.google.com → New project</li>
               <li>Enable <b>Google Drive API</b> + <b>Identity API</b></li>
               <li>Credentials → OAuth 2.0 Web Client → HTTPS domain</li>
-              <li>Replace <code>YOUR_CLIENT_ID</code> in app.js config</li>
+              <li>Replace <code>YOUR_CLIENT_ID</code> in config.js</li>
               <li>Host on HTTPS (GitHub Pages / Netlify = free)</li>
             </ol>
           </div></details>
@@ -324,23 +330,15 @@
   <h2><span id="m-ico">📍</span><span id="m-hd">New POI</span></h2>
   <div class="fld"><label class="lbl">Name *</label><input class="inp" id="m-name" type="text" placeholder="Place name..."></div>
   <div class="fld"><label class="lbl">Notes</label><textarea class="inp" id="m-desc" rows="3" placeholder="Opening hours, tips..."></textarea></div>
-  <div class="fr2">
-    <div><label class="lbl">Category</label>
-      <select class="inp" id="m-cat">
-        <option value="general">📍 General</option><option value="hotel">🏨 Hotel</option>
-        <option value="camping">⛺ Camping</option>
-        <option value="restaurant">🍽️ Restaurant</option><option value="attraction">🎯 Attraction</option>
-        <option value="hike">🥾 Hike</option><option value="view">🌄 Viewpoint</option>
-        <option value="gas">⛽ Gas</option><option value="parking">🅿️ Parking</option>
-        <option value="info">ℹ️ Info</option>
-      </select>
-    </div>
-    <div><label class="lbl">Rating</label>
-      <select class="inp" id="m-rat">
-        <option value="">—</option><option value="5">★★★★★</option><option value="4">★★★★☆</option>
-        <option value="3">★★★☆☆</option><option value="2">★★☆☆☆</option><option value="1">★☆☆☆☆</option>
-      </select>
-    </div>
+  <div class="fld"><label class="lbl">Category</label>
+    <select class="inp" id="m-cat">
+      <option value="general">📍 General</option><option value="hotel">🏨 Hotel</option>
+      <option value="camping">⛺ Camping</option>
+      <option value="restaurant">🍽️ Restaurant</option><option value="attraction">🎯 Attraction</option>
+      <option value="hike">🥾 Hike</option><option value="view">🌄 Viewpoint</option>
+      <option value="gas">⛽ Gas</option><option value="parking">🅿️ Parking</option>
+      <option value="info">ℹ️ Info</option>
+    </select>
   </div>
   <!-- Propagate to next day — shown only for hotel/camping -->
   <div id="m-propagate-row" class="tog-row" style="display:none;margin-bottom:7px;border-radius:var(--rs);padding:7px 10px;background:rgba(29,86,212,.05);border:1px solid rgba(29,86,212,.15);">
@@ -362,29 +360,64 @@
       <div id="ctt-computed" style="font-size:.62rem;color:var(--gold);margin-top:3px;font-weight:700;"></div>
     </div>
   </div>
+  <!-- Color: compact circle + modal picker -->
   <div class="fld">
-    <label class="lbl">Assign to Days</label>
-    <div id="m-days-list"><div style="font-size:.65rem;color:var(--muted);">No days yet.</div></div>
-    <select id="m-day" style="display:none;"></select>
-  </div>
-  <div class="fld"><label class="lbl">Color</label>
-    <div class="crow">
-      <div class="csw on" style="background:#c94f14" data-c="#c94f14"></div>
-      <div class="csw" style="background:#1d56d4" data-c="#1d56d4"></div>
-      <div class="csw" style="background:#15803d" data-c="#15803d"></div>
-      <div class="csw" style="background:#d4920a" data-c="#d4920a"></div>
-      <div class="csw" style="background:#7c22d4" data-c="#7c22d4"></div>
-      <div class="csw" style="background:#c81e1e" data-c="#c81e1e"></div>
-      <div class="csw" style="background:#0e7eb5" data-c="#0e7eb5"></div>
-      <div class="csw" style="background:#b01e6a" data-c="#b01e6a"></div>
+    <label class="lbl">Color</label>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:3px;">
+      <span id="m-color-preview" style="width:22px;height:22px;border-radius:50%;background:#c94f14;border:2px solid var(--border2);cursor:pointer;flex-shrink:0;display:inline-block;" onclick="openFormColorPicker()" title="Pick color"></span>
+      <span id="m-color-hint" style="font-size:.63rem;color:var(--muted);">(auto from day)</span>
+      <button class="btn bg bsm" onclick="openFormColorPicker()" style="font-size:.63rem;">✎ Pick</button>
+      <button class="btn bg bsm" onclick="selColAuto()" style="font-size:.63rem;">↩ Auto</button>
+    </div>
+    <!-- Hidden swatches still needed for selCol() logic -->
+    <div style="display:none;">
+      <div class="csw" data-c="#c94f14"></div><div class="csw" data-c="#1d56d4"></div>
+      <div class="csw" data-c="#15803d"></div><div class="csw" data-c="#d4920a"></div>
+      <div class="csw" data-c="#7c22d4"></div><div class="csw" data-c="#c81e1e"></div>
+      <div class="csw" data-c="#0e7eb5"></div><div class="csw" data-c="#b01e6a"></div>
     </div>
   </div>
-  <div class="fld"><label class="lbl">Links / URLs</label>
-    <div id="m-links"></div>
-    <button class="btn bg bsm" id="btn-alink" style="margin-top:4px;">+ Add link</button>
+  <!-- Assign to Days: compact + modal -->
+  <div class="fld">
+    <label class="lbl">Assigned days</label>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap;">
+      <div id="m-days-badges" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;"></div>
+      <button class="btn bg bsm" onclick="openFormDaysModal()" style="font-size:.63rem;white-space:nowrap;">📅 Edit</button>
+    </div>
+    <!-- Hidden checkboxes read by getSelectedDayIds() -->
+    <div id="m-days-list" style="display:none;"></div>
+    <select id="m-day" style="display:none;"></select>
   </div>
-  <div class="fld"><label class="lbl">Tags (comma separated)</label><input class="inp" id="m-tags" placeholder="museum, free..."></div>
+  <!-- Hidden fields kept for save logic (rating, tags, links preserved in data) -->
+  <select id="m-rat" style="display:none;"></select>
+  <input id="m-tags" style="display:none;">
+  <div id="m-links" style="display:none;"></div>
   <div class="mfoot"><button class="btn bg" id="m-cancel">Cancel</button><button class="btn ba" id="m-save">Save POI</button></div>
+</div></div>
+
+<!-- Form Days Modal (for POI edit form) -->
+<div id="form-days-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1200;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:13px;" onclick="if(event.target===this)closeFormDaysModal()">
+<div style="background:var(--surf);border:1px solid var(--border2);border-radius:var(--rl);padding:16px;width:100%;max-width:320px;box-shadow:var(--sh2);">
+  <h2 style="font-family:var(--head);font-weight:900;font-size:.9rem;margin-bottom:10px;">📅 Assign to days</h2>
+  <div id="form-days-list" style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto;"></div>
+  <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+    <button class="btn ba" onclick="closeFormDaysModal()">OK</button>
+  </div>
+</div></div>
+
+<!-- Form Color Picker Modal -->
+<div id="form-cpick-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1200;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:13px;" onclick="if(event.target===this)closeFormColorPicker()">
+<div style="background:var(--surf);border:1px solid var(--border2);border-radius:var(--rl);padding:16px;width:100%;max-width:300px;box-shadow:var(--sh2);">
+  <h2 style="font-family:var(--head);font-weight:900;font-size:.9rem;margin-bottom:12px;">🎨 POI Color</h2>
+  <div id="form-cpick-swatches" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px;"></div>
+  <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px;">
+    <label style="font-size:.65rem;font-weight:700;color:var(--muted2);white-space:nowrap;">Hex :</label>
+    <input class="inp" id="form-cpick-hex" type="text" placeholder="#c94f14" style="flex:1;font-size:.72rem;" oninput="if(this.value.match(/^#[0-9a-fA-F]{6}$/))applyFormColor(this.value)">
+  </div>
+  <div style="display:flex;gap:6px;justify-content:flex-end;">
+    <button class="btn bg" onclick="closeFormColorPicker()">Close</button>
+    <button class="btn bg bsm" onclick="selColAuto();closeFormColorPicker()">↩ Auto</button>
+  </div>
 </div></div>
 
 <!-- Route Edit Modal -->
@@ -408,7 +441,7 @@
   <div class="fld">
     <label class="lbl">Route color</label>
     <div class="crow" id="re-colors" style="margin-top:4px;">
-      <div class="csw on" style="background:#1d56d4" data-rc2="#1d56d4"></div>
+      <div class="csw" style="background:#1d56d4" data-rc2="#1d56d4"></div>
       <div class="csw" style="background:#15803d" data-rc2="#15803d"></div>
       <div class="csw" style="background:#d4920a" data-rc2="#d4920a"></div>
       <div class="csw" style="background:#c81e1e" data-rc2="#c81e1e"></div>
@@ -416,25 +449,37 @@
       <div class="csw" style="background:#0e7eb5" data-rc2="#0e7eb5"></div>
       <div class="csw" style="background:#b01e6a" data-rc2="#b01e6a"></div>
       <div class="csw" style="background:#c94f14" data-rc2="#c94f14"></div>
+      <button class="btn bg bsm" onclick="selRtCol2Auto()" title="Auto-color from assigned day" style="font-size:.63rem;padding:2px 6px;white-space:nowrap;">↩ Auto</button>
     </div>
   </div>
   <div class="mfoot"><button class="btn bg" id="re-cancel">Cancel</button><button class="btn bb" id="re-save">Recalculate &amp; Save</button></div>
 </div></div>
 
-<!-- Shift Days Modal -->
-<div id="shiftmbk" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px);padding:13px;">
-<div style="background:var(--surf);border:1px solid var(--border2);border-radius:var(--rl);padding:18px;width:100%;max-width:380px;box-shadow:var(--sh2);">
-  <h2 style="font-family:var(--head);font-weight:900;font-size:.94rem;margin-bottom:11px;">&#x1F4C5; Shift All Dates</h2>
-  <p style="font-size:.72rem;color:var(--muted);margin-bottom:10px;line-height:1.6;">Move all days forward or backward.</p>
-  <div class="fr2">
-    <div><label class="lbl">New start date</label><input class="inp" type="date" id="shift-start"></div>
-    <div><label class="lbl">Shift by (days)</label><input class="inp" type="number" id="shift-delta" placeholder="+9 or -3"></div>
+<!-- Color Picker Modal -->
+<div id="cpick-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1100;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:13px;" onclick="if(event.target===this)closePoiColorPicker()">
+<div style="background:var(--surf);border:1px solid var(--border2);border-radius:var(--rl);padding:16px;width:100%;max-width:300px;box-shadow:var(--sh2);">
+  <h2 style="font-family:var(--head);font-weight:900;font-size:.9rem;margin-bottom:12px;">🎨 POI Color</h2>
+  <input type="hidden" id="cpick-poi-id">
+  <div id="cpick-swatches" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px;"></div>
+  <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px;">
+    <label style="font-size:.65rem;font-weight:700;color:var(--muted2);white-space:nowrap;">Hex&nbsp;:</label>
+    <input class="inp" id="cpick-hex" type="text" placeholder="#c94f14" style="flex:1;font-size:.72rem;" oninput="if(this.value.match(/^#[0-9a-fA-F]{6}$/)){setPoiColorFromPicker(+qs('#cpick-poi-id').value,this.value);}">
   </div>
-  <div id="shift-preview" style="font-size:.67rem;color:var(--muted);margin-bottom:8px;background:var(--surf2);border:1px solid var(--border);border-radius:var(--rs);padding:8px;display:none;max-height:140px;overflow-y:auto;line-height:1.8;"></div>
-  <div class="mfoot">
-    <button class="btn bg" id="shift-cancel">Cancel</button>
-    <button class="btn bg" id="shift-preview-btn">Preview</button>
-    <button class="btn ba" id="shift-apply">Apply</button>
+  <div style="display:flex;gap:6px;justify-content:flex-end;">
+    <button class="btn bg" onclick="closePoiColorPicker()">Close</button>
+    <button class="btn bg bsm" onclick="(function(){const p=S.pois.find(x=>x.id===+qs('#cpick-poi-id').value);if(p){p.colorLocked=false;if(p.marker)p.marker.setIcon(mkPin(getPoiColor(p),CATS[p.cat]||'📍'));if(p.marker&&p.marker.getPopup()&&p.marker.getPopup().isOpen())p.marker.setPopupContent(popH(p));closePoiColorPicker();ra();}})()">↩ Auto</button>
+  </div>
+</div></div>
+
+<!-- Day Assignment Modal -->
+<div id="dayassign-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1100;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:13px;" onclick="if(event.target===this)closeDayAssignModal()">
+<div style="background:var(--surf);border:1px solid var(--border2);border-radius:var(--rl);padding:16px;width:100%;max-width:320px;box-shadow:var(--sh2);">
+  <h2 style="font-family:var(--head);font-weight:900;font-size:.9rem;margin-bottom:4px;">📅 Assign to days</h2>
+  <div id="dayassign-poi-name" style="font-size:.72rem;color:var(--muted);margin-bottom:10px;"></div>
+  <input type="hidden" id="dayassign-poi-id">
+  <div id="dayassign-list" style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto;"></div>
+  <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+    <button class="btn bg" onclick="closeDayAssignModal()">Close</button>
   </div>
 </div></div>
 
@@ -478,16 +523,5 @@
   loadNext();
 })();
 </script>
-
-<script>
-if('serviceWorker' in navigator){
-  window.addEventListener('load', ()=>{
-    navigator.serviceWorker.register('./sw.js')
-      .then(r=>console.log('SW registered:', r.scope))
-      .catch(e=>console.warn('SW failed:', e));
-  });
-}
-</script>
-
 </body>
 </html>

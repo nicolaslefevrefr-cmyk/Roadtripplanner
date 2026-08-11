@@ -24,13 +24,13 @@ function pickSR(lat,lon,name){ qs('#srdr').style.display='none'; qs('#psrch').va
 function refMDay(){ const o='<option value="">— Not assigned —</option>'+S.days.map(d=>'<option value="'+d.id+'">'+esc(d.title)+(d.date?' ('+d.date+')':'')+'</option>').join(''); const mdEl=qs('#m-day'); if(mdEl) mdEl.innerHTML=o; }
 function renderMDayCheckboxes(selectedIds){
   const el=qs('#m-days-list'); if(!el) return;
-  if(!S.days.length){ el.innerHTML='<div style="font-size:.65rem;color:var(--muted);">No days yet.</div>'; return; }
+  if(!S.days.length){ el.innerHTML=''; updateDayBadges(); return; }
   el.innerHTML=S.days.map((d,di)=>{
     const checked=selectedIds.includes(d.id)?'checked':'';
-    const c=DAY_ZONE_COLORS[di%DAY_ZONE_COLORS.length];
-    return'<label class="mday-row"><input type="checkbox" value="'+d.id+'" '+checked+' onchange="updateCostTypeUI()"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+c+';flex-shrink:0;"></span>'+esc(d.title)+(d.date?' <span style="color:var(--muted2);font-size:.6rem;">'+d.date+'</span>':'')+'</label>';
+    const c=d.color||DAY_ZONE_COLORS[di%DAY_ZONE_COLORS.length];
+    return'<label class="mday-row" style="display:none;"><input type="checkbox" value="'+d.id+'" '+checked+' onchange="updateCostTypeUI();updateDayBadges()"></label>';
   }).join('');
-  updateCostTypeUI();
+  updateCostTypeUI(); updateDayBadges();
 }
 function getSelectedDayIds(){ return qsa('#m-days-list input[type=checkbox]:checked').map(cb=>Number(cb.value)); }
 
@@ -55,9 +55,9 @@ function updateCostTypeUI(){
 function openModal(ll,name){
   S.pendLL=ll;
   if(!S.editing){
-    qs('#m-name').value=name||''; qs('#m-desc').value=''; qs('#m-cat').value='general'; qs('#m-rat').value='';
-    qs('#m-tags').value=''; qs('#m-cost').value='';
-    selCol('#c94f14'); renderLinks([]); qs('#m-hd').textContent='New POI'; qs('#m-ico').textContent='📍';
+    qs('#m-name').value=name||''; qs('#m-desc').value=''; qs('#m-cat').value='general';
+    qs('#m-cost').value='';
+    selCol('#c94f14'); qs('#m-hd').textContent='New POI'; qs('#m-ico').textContent='📍';
     setCostType('total'); renderMDayCheckboxes([]);
     const propRow=qs('#m-propagate-row'); if(propRow) propRow.style.display='none';
     const propCb=qs('#m-propagate'); if(propCb) propCb.checked=true;
@@ -66,7 +66,56 @@ function openModal(ll,name){
   qs('#mbk').classList.add('on'); setTimeout(()=>qs('#m-name').focus(),80);
 }
 function closeModal(){ qs('#mbk').classList.remove('on'); S.editing=null; restoreDrawer(); }
-function selCol(c){ S.col=c; qsa('.csw').forEach(s=>s.classList.toggle('on',s.dataset.c===c)); }
+function selCol(c){
+  S.col=c;
+  qsa('.csw').forEach(s=>s.classList.toggle('on',s.dataset.c===c));
+  const h=qs('#m-color-hint'); if(h) h.textContent='(custom)';
+  const prev=qs('#m-color-preview'); if(prev) prev.style.background=c;
+}
+function selColAuto(){
+  qsa('.csw[data-c]').forEach(s=>s.classList.remove('on'));
+  const h=qs('#m-color-hint'); if(h) h.textContent='(auto from day)';
+  const prev=qs('#m-color-preview'); if(prev) prev.style.background='var(--border2)';
+}
+
+const FORM_COLORS=['#c94f14','#1d56d4','#15803d','#d4920a','#7c22d4','#c81e1e','#0e7eb5','#b01e6a','#e91e8c','#00796b'];
+function openFormColorPicker(){
+  const m=qs('#form-cpick-modal'); if(!m) return;
+  qs('#form-cpick-swatches').innerHTML=FORM_COLORS.map(c=>'<div class="cpick-swatch'+(S.col===c?' cpick-on':'')+'" style="background:'+c+';" onclick="applyFormColor(\''+c+'\')"></div>').join('');
+  qs('#form-cpick-hex').value='';
+  m.style.display='flex';
+}
+function applyFormColor(c){ selCol(c); qs('#form-cpick-hex').value=c; qs('#form-cpick-swatches').querySelectorAll('.cpick-swatch').forEach(s=>s.classList.toggle('cpick-on',s.style.background===c||s.style.backgroundColor===c)); }
+function closeFormColorPicker(){ const m=qs('#form-cpick-modal'); if(m) m.style.display='none'; }
+
+function updateDayBadges(){
+  const badges=qs('#m-days-badges'); if(!badges) return;
+  const ids=getSelectedDayIds();
+  if(!ids.length){ badges.innerHTML='<span style="font-size:.63rem;color:var(--muted);">No day assigned</span>'; return; }
+  badges.innerHTML=ids.map(id=>{ const d=S.days.find(x=>x.id===id); if(!d) return''; const di=S.days.indexOf(d); const c=d.color||DAY_ZONE_COLORS[di%DAY_ZONE_COLORS.length]; return'<span style="background:'+c+';color:#fff;border-radius:8px;padding:1px 7px;font-size:.6rem;font-weight:700;">'+esc(d.title)+'</span>'; }).join('');
+}
+function openFormDaysModal(){
+  const m=qs('#form-days-modal'); if(!m) return;
+  const selectedIds=getSelectedDayIds();
+  qs('#form-days-list').innerHTML=S.days.map((d,di)=>{
+    const checked=selectedIds.includes(d.id)?'checked':'';
+    const c=d.color||DAY_ZONE_COLORS[di%DAY_ZONE_COLORS.length];
+    const fd=fmtDate(d.date);
+    return'<label class="dayassign-row">'
+      +'<input type="checkbox" value="'+d.id+'" '+checked+' style="accent-color:'+c+';cursor:pointer;width:16px;height:16px;" onchange="syncFormDay('+d.id+',this.checked)">'
+      +'<span class="dayassign-dot" style="background:'+c+';"></span>'
+      +'<span class="dayassign-name">'+esc(d.title)+(fd?' <span style="color:var(--muted2);font-size:.6rem;">'+fd+'</span>':'')+'</span>'
+      +'</label>';
+  }).join('');
+  m.style.display='flex';
+}
+function syncFormDay(dayId, checked){
+  const cb=qs('#m-days-list input[type=checkbox][value="'+dayId+'"]'); if(cb) cb.checked=checked;
+  updateCostTypeUI(); updateDayBadges();
+}
+function closeFormDaysModal(){ const m=qs('#form-days-modal'); if(m) m.style.display='none'; updateDayBadges(); }
+function selRtColAuto(){ qsa('.csw[data-rc]').forEach(s=>s.classList.remove('on')); }
+function selRtCol2Auto(){ qsa('.csw[data-rc2]').forEach(s=>s.classList.remove('on')); }
 function renderLinks(links){ const el=qs('#m-links'); el.innerHTML=''; (links.length?links:[{label:'',url:''}]).forEach(lk=>{ const row=document.createElement('div'); row.className='lrow'; row.innerHTML='<input class="inp" style="width:76px;flex-shrink:0;" placeholder="Label" value="'+(lk.label||'')+'"><input class="inp" style="flex:1;" placeholder="https://..." value="'+(lk.url||'')+'"><button class="btn br bic bsm" onclick="this.parentNode.remove()">✕</button>'; el.appendChild(row); }); }
 function getLinks(){ return qsa('.lrow').map(row=>{ const i=row.querySelectorAll('input'); return{label:i[0].value.trim(),url:i[1].value.trim()}; }).filter(l=>l.url); }
 
@@ -88,15 +137,14 @@ function tripData(){
   return{appVersion:APP_VERSION,savedAt:new Date().toISOString(),tripName:qs('#tname').value,
     fuelSettings:{consump:fp.c,price:fp.p},
     settings:Object.assign({},CFG),
-    eatingDefault:undefined,  // kept for old-file migration detection
-    dailyExpenses:S.dailyExpenses.map(e=>Object.assign({},e)),
-    dailyExpenseOverrides:JSON.parse(JSON.stringify(S.dailyExpenseOverrides)),
+    eatingDefault:S.eatingDefault,
+    eatingBudgets:Object.assign({},S.eatingBudgets),
     dayVisibility:Object.assign({},S.dayVisibility),
     poiVisibility:Object.assign({},S.poiVisibility),
     allPOIsHidden:S.allPOIsHidden||false,
-    pois:S.pois.map(p=>({id:p.id,name:p.name,desc:p.desc,cat:p.cat,color:p.color,rating:p.rating,links:p.links,tags:p.tags,lat:p.lat,lng:p.lng,locked:p.locked,dayIds:p.dayIds||[],cost:p.cost||0,costType:p.costType||'total',propagateAccom:p.propagateAccom!==false})),
-    routes:S.routes.map(r=>({id:r.id,fromId:r.fromId,toId:r.toId,fromName:r.fromName,toName:r.toName,mode:r.mode,dist:r.dist,dur:r.dur,dayId:r.dayId,fixedCost:r.fixedCost||0,color:r.color||'#1d56d4'})),
-    days:S.days.map(d=>({id:d.id,title:d.title,date:d.date||'',items:d.items.map(i=>Object.assign({},i))}))};
+    pois:S.pois.map(p=>({id:p.id,name:p.name,desc:p.desc,cat:p.cat,color:p.color,rating:p.rating,links:p.links,tags:p.tags,lat:p.lat,lng:p.lng,locked:p.locked,dayIds:p.dayIds||[],cost:p.cost||0,costType:p.costType||'total',propagateAccom:p.propagateAccom!==false,colorLocked:p.colorLocked||false})),
+    routes:S.routes.map(r=>({id:r.id,fromId:r.fromId,toId:r.toId,fromName:r.fromName,toName:r.toName,mode:r.mode,dist:r.dist,dur:r.dur,dayId:r.dayId,fixedCost:r.fixedCost||0,color:r.color||'#1d56d4',colorLocked:r.colorLocked||false})),
+    days:S.days.map(d=>({id:d.id,title:d.title,date:d.date||'',color:d.color||'',items:d.items.map(i=>Object.assign({},i))}))};
 }
 function saveTrip(){ const data=tripData(); const b=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=data.tripName.replace(/\s+/g,'_')+'_v'+APP_VERSION+'.json'; a.click(); toast('Saved!','ok'); }
 async function loadData(json){
@@ -106,33 +154,19 @@ async function loadData(json){
     if(d.fuelSettings){ if(d.fuelSettings.consump) qs('#f-consump').value=d.fuelSettings.consump; if(d.fuelSettings.price) qs('#f-price').value=d.fuelSettings.price; }
     // Restore settings — don't overwrite fontScale if it differs, respect user's device preference
     if(d.settings){ Object.assign(CFG, d.settings); saveCFG(); applySettings(); }
-    // Restore daily expenses (new format)
-    if(d.dailyExpenses && d.dailyExpenses.length){
-      S.dailyExpenses = d.dailyExpenses.map(e=>Object.assign({},e));
-      S.dailyExpenseOverrides = JSON.parse(JSON.stringify(d.dailyExpenseOverrides||{}));
-    } else {
-      // Migrate old format: eatingDefault + eatingBudgets → first expense category
-      S.dailyExpenses = DEFAULT_DAILY_EXPENSES.map(e=>Object.assign({},e));
-      if(d.eatingDefault){
-        S.dailyExpenses[0].defaultPerDay = +(d.eatingDefault||0);
-        // Migrate per-day overrides
-        Object.entries(d.eatingBudgets||{}).forEach(([did,val])=>{
-          if(!S.dailyExpenseOverrides[did]) S.dailyExpenseOverrides[did]={};
-          S.dailyExpenseOverrides[did]['exp_eating'] = +val;
-        });
-      }
-    }
+    S.eatingDefault = +(d.eatingDefault||0);
+    if(d.eatingBudgets) Object.assign(S.eatingBudgets, d.eatingBudgets);
     if(d.dayVisibility) Object.assign(S.dayVisibility, d.dayVisibility);
     if(d.poiVisibility) Object.assign(S.poiVisibility, d.poiVisibility);
     S.allPOIsHidden = !!d.allPOIsHidden;
-    (d.days||[]).forEach(day=>S.days.push({id:Number(day.id),title:day.title,date:day.date||'',items:(day.items||[]).map(i=>Object.assign({},i))}));
-    (d.pois||[]).forEach(p=>{ const dayIds=p.dayIds||(p.dayId?[Number(p.dayId)]:[]); addPOI({lat:p.lat,lng:p.lng},{id:Number(p.id),name:p.name,desc:p.desc,cat:p.cat,color:p.color,rating:p.rating,links:p.links,tags:p.tags,locked:p.locked,dayIds:dayIds.map(Number),cost:+(p.cost||0),costType:p.costType||'total',propagateAccom:p.propagateAccom!==false}); });
+    (d.days||[]).forEach(day=>S.days.push({id:Number(day.id),title:day.title,date:day.date||'',color:day.color||'',items:(day.items||[]).map(i=>Object.assign({},i))}));
+    (d.pois||[]).forEach(p=>{ const dayIds=p.dayIds||(p.dayId?[Number(p.dayId)]:[]); addPOI({lat:p.lat,lng:p.lng},{id:Number(p.id),name:p.name,desc:p.desc,cat:p.cat,color:p.color,rating:p.rating,links:p.links,tags:p.tags,locked:p.locked,dayIds:dayIds.map(Number),cost:+(p.cost||0),costType:p.costType||'total',propagateAccom:p.propagateAccom!==false,colorLocked:p.colorLocked||false}); });
     fillRS('rf','rt','rd');
     const routes=d.routes||[];
     if(routes.length){ toast('Recalculating '+routes.length+' route(s)…','');
-      for(const r of routes){ const savedCol=r.color||'#1d56d4'; S.rtCol=savedCol;
-        if(r.mode==='manual'){ const from=S.pois.find(p=>p.id===Number(r.fromId)),to=S.pois.find(p=>p.id===Number(r.toId)); if(from&&to){ const coords=[[from.lat,from.lng],[to.lat,to.lng]]; const poly=L.polyline(coords,{color:savedCol,weight:3,opacity:.8,dashArray:'10 6'}).addTo(map); const rt=Object.assign({},r,{id:Number(r.id),fromId:Number(r.fromId),toId:Number(r.toId),dayId:r.dayId?Number(r.dayId):null,fixedCost:+(r.fixedCost||0),color:savedCol,coords,poly,hourDotMarkers:[]}); S.routes.push(rt); bindRouteHover(rt); placeHourDots(rt); } }
-        else{ await calcRoute(Number(r.fromId),Number(r.toId),r.mode,r.dayId?Number(r.dayId):null,Number(r.id),+(r.fixedCost||0),null); const rt=S.routes.find(x=>x.id===Number(r.id)); if(rt){ rt.color=savedCol; if(rt.poly) rt.poly.setStyle({color:savedCol}); placeHourDots(rt); } } }
+      for(const r of routes){ const savedCol=r.color||'#1d56d4'; const cl=r.colorLocked||false; S.rtCol=savedCol;
+        if(r.mode==='manual'){ const from=S.pois.find(p=>p.id===Number(r.fromId)),to=S.pois.find(p=>p.id===Number(r.toId)); if(from&&to){ const coords=[[from.lat,from.lng],[to.lat,to.lng]]; const poly=L.polyline(coords,{color:savedCol,weight:3,opacity:.8,dashArray:'10 6'}).addTo(map); const rt=Object.assign({},r,{id:Number(r.id),fromId:Number(r.fromId),toId:Number(r.toId),dayId:r.dayId?Number(r.dayId):null,fixedCost:+(r.fixedCost||0),color:savedCol,colorLocked:cl,coords,poly,hourDotMarkers:[]}); S.routes.push(rt); bindRouteHover(rt); placeHourDots(rt); if(rt.poly) rt.poly.setStyle({color:getRouteColor(rt)}); } }
+        else{ await calcRoute(Number(r.fromId),Number(r.toId),r.mode,r.dayId?Number(r.dayId):null,Number(r.id),+(r.fixedCost||0),null,cl); const rt=S.routes.find(x=>x.id===Number(r.id)); if(rt){ rt.color=savedCol; rt.colorLocked=cl; if(rt.poly) rt.poly.setStyle({color:getRouteColor(rt)}); placeHourDots(rt); } } }
     }
     ra();
     if(S.pois.length) map.fitBounds(L.latLngBounds(S.pois.map(p=>[p.lat,p.lng])),{padding:[50,50]});
@@ -145,8 +179,7 @@ function clearAll(s){
   clearLines(); poiLabelLayer.clearLayers();
   S.dayOrderLines.forEach(l=>map.removeLayer(l)); S.dayOrderLines=[];
   S.pois.length=0; S.routes.length=0; S.days.length=0;
-  S.dailyExpenses=DEFAULT_DAILY_EXPENSES.map(e=>Object.assign({},e));
-  S.dailyExpenseOverrides={}; S.dayVisibility={}; S.poiVisibility={}; S.allPOIsHidden=false;
+  S.eatingBudgets={}; S.eatingDefault=0; S.dayVisibility={}; S.poiVisibility={}; S.allPOIsHidden=false;
   getZoneSvg().innerHTML=''; ra(); if(!s) toast('Cleared','ok');
 }
 function expGPX(){ const w=S.pois.map(p=>'  <wpt lat="'+p.lat+'" lon="'+p.lng+'"><name>'+esc(p.name)+'</name></wpt>').join('\n'); const t=S.routes.map(r=>'  <trk><name>'+esc(r.fromName)+'→'+esc(r.toName)+'</name><trkseg>'+r.coords.map(c=>'<trkpt lat="'+c[0]+'" lon="'+c[1]+'"></trkpt>').join('')+'</trkseg></trk>').join('\n'); const b=new Blob(['<?xml version="1.0"?>\n<gpx version="1.1">\n'+w+'\n'+t+'\n</gpx>'],{type:'application/gpx+xml'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='roadtrip.gpx'; a.click(); toast('GPX exported','ok'); }
