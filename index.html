@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<meta name="application-name" content="RoadTrip Planner">
+<meta name="description" content="Plan road trips: POIs, routes, day itineraries, costs, GPS.">
+<meta name="theme-color" content="#c94f14">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="RoadTrip">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>RoadTrip Planner</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link id="app-css" rel="stylesheet" href="style.css?v=__BUILD__">
+</head>
+<body>
+<div id="map"></div>
+<!-- Day zone SVG — sibling of map, sized to map container on each draw to avoid overflow:hidden clipping -->
+<svg id="day-zone-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+
+<!-- GPS live badge -->
+<div id="gbadge">
+  <span style="width:8px;height:8px;border-radius:50%;background:var(--green);animation:gpa 1.5s infinite;flex-shrink:0;display:block;"></span>
+  <span id="gbt">GPS</span>
+</div>
+
+<!-- Map right toolbar -->
+<div id="map-tb">
+  <button class="mib" id="t-theme" title="Toggle theme">☀️</button>
+  <button class="mib" id="t-home" title="Fit all">🏠</button>
+  <button class="mib" id="t-sat" title="Satellite">🛰️</button>
+  <button class="mib" id="t-gpsq" title="My location">📍</button>
+</div>
+
+<!-- FAB -->
+<button id="fab" title="Add POI">＋</button>
+<input type="file" id="finp" accept=".json" style="display:none;">
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <button id="btn-drawer">☰</button>
+  <div id="topbar-title">Road<em>Trip</em></div>
+  <div id="topbar-pills">
+    <div class="tpill">📍 <b id="hp">0</b></div>
+    <div class="tpill hide-sm">🛣️ <b id="hr">0</b> <b id="hkm" style="color:var(--muted);">0km</b></div>
+    <div class="tpill hide-sm">📅 <b id="hd">0</b></div>
+    <div class="tpill gold">💰$<b id="htotal">0</b></div>
+  </div>
+  <div id="topbar-actions">
+    <button class="tb-btn" id="btn-savh" title="Save">💾</button>
+    <button class="tb-btn" id="btn-lodh" title="Load">📂</button>
+  </div>
+</div>
+
+<div id="drawer-backdrop" onclick="closeDrawer(true)"></div>
+
+<!-- DRAWER -->
+<div id="drawer">
+  <div id="dhdr">
+    <div id="dhdr-r1">
+      <h2>Road<em>Trip</em><span id="dhdr-ver"></span></h2>
+      <button class="dib" id="t-theme2">☀️</button>
+      <button class="dib" id="btn-savh2" title="Save">💾</button>
+      <button class="dib" id="btn-lodh2" title="Load">📂</button>
+      <button class="dib" id="btn-pin" title="Pin panel (desktop)" onclick="togglePin()" style="margin-left:2px;">📌</button>
+      <button class="dib" onclick="closeDrawer(true)" title="Close" style="margin-left:2px;">✕</button>
+    </div>
+    <input id="tname" type="text" placeholder="Trip name..." value="My Road Trip">
+  </div>
+
+  <div id="tabs">
+    <div class="tab on" data-tab="pois"><span style="font-size:1rem;">📍</span></div>
+    <div class="tab" data-tab="days"><span style="font-size:1rem;">📅</span></div>
+    <div class="tab" data-tab="routes"><span style="font-size:1rem;">🛣️</span></div>
+    <div class="tab" data-tab="gps"><span style="font-size:1rem;">🧭</span></div>
+    <div class="tab" data-tab="save"><span style="font-size:1rem;">☁️</span></div>
+    <div class="tab" data-tab="settings"><span style="font-size:1rem;">⚙️</span></div>
+  </div>
+
+  <div id="fbar">
+    <div class="fc on" data-cat="all">All</div>
+    <div class="fc" data-cat="hotel">🏨</div>
+    <div class="fc" data-cat="restaurant">🍽️</div>
+    <div class="fc" data-cat="attraction">🎯</div>
+    <div class="fc" data-cat="hike">🥾</div>
+    <div class="fc" data-cat="view">🌄</div>
+    <div class="fc" data-cat="gas">⛽</div>
+    <div class="fc" data-cat="parking">🅿️</div>
+    <div class="fc" data-cat="general">📍</div>
+  </div>
+
+  <!-- ── POIs ── -->
+  <div class="panel on" id="panel-pois">
+    <div class="pbd">
+      <div class="sr">
+        <input class="inp" id="psrch" type="text" placeholder="Search a place..." style="flex:1;">
+        <button class="btn ba bic" id="btn-srch">🔍</button>
+      </div>
+      <div id="srdr"></div>
+      <div style="display:flex;gap:5px;margin-bottom:7px;align-items:center;">
+        <button class="btn bg bsm" id="btn-place" style="flex:1;">📍 Click map</button>
+        <button class="btn bg bsm" id="btn-new" style="flex:1;">+ New POI</button>
+        <button class="btn bg bic bsm" onclick="setAllPOIsVisibility(true)" title="Show all POIs" style="font-size:.8rem;">👁</button>
+        <button class="btn bg bic bsm" onclick="setAllPOIsVisibility(false)" title="Hide all POIs" style="font-size:.8rem;">👁‍🗨</button>
+      </div>
+      <div class="sec"><span>Backlog</span><span class="badge" id="pcnt">0</span><span class="sl"></span></div>
+      <div id="poi-list"></div>
+    </div>
+  </div>
+
+  <!-- ── Days ── -->
+  <div class="panel" id="panel-days">
+    <div style="padding:8px 10px;border-bottom:1px solid var(--border);flex-shrink:0;display:flex;gap:5px;align-items:center;">
+      <button class="btn ba bsm" id="btn-addd" style="flex:1;">+ Add Day</button>
+      <button class="btn bg bsm" id="btn-shift-dates">&#x1F4C5; Shift dates</button>
+      <button class="btn bg bic bsm" id="btn-days-show-all" onclick="setAllDaysVisibility(true)" title="Show all days" style="font-size:.85rem;">👁</button>
+      <button class="btn bg bic bsm" id="btn-days-hide-all" onclick="setAllDaysVisibility(false)" title="Hide all days" style="font-size:.85rem;">👁‍🗨</button>
+    </div>
+    <div class="pbd" id="day-list"></div>
+  </div>
+
+  <!-- ── Routes ── -->
+  <div class="panel" id="panel-routes">
+    <div class="pbd">
+      <!-- Fuel -->
+      <details class="finance-box" id="finance-details">
+        <summary>Fuel &amp; Cost Settings</summary>
+        <div class="finance-inner">
+          <div class="fr2">
+            <div><label class="lbl">Consumption (L/100km)</label><input class="inp" id="f-consump" type="number" min="0" step=".1" value="7"></div>
+            <div><label class="lbl">Fuel price ($/L)</label><input class="inp" id="f-price" type="number" min="0" step=".01" value="1.70"></div>
+          </div>
+          <div style="font-size:.65rem;color:var(--muted);line-height:1.6;">Fuel cost applies to 🚗 Car routes only.</div>
+          <div class="finance-total" id="finance-total-rt">⛽ Total fuel cost: <b>$0.00</b></div>
+        </div>
+      </details>
+      <!-- Daily Expenses (generalised per-category daily budget) -->
+      <details class="daily-expenses-box" id="daily-expenses-details">
+        <summary>Daily Expenses</summary>
+        <div class="daily-expenses-inner">
+          <div style="font-size:.64rem;color:var(--muted);margin-bottom:8px;line-height:1.65;">
+            Define <b>expense categories</b> (eating, gas, parking…) with a default amount per day. Override any individual day directly in the Days tab.
+          </div>
+          <div id="daily-expenses-list"></div>
+          <button class="btn bg bsm bfw" onclick="addDailyExpense()" style="margin-top:4px;">＋ Add category</button>
+          <div class="daily-expenses-total" id="daily-expenses-total">Total: <b>$0.00</b></div>
+        </div>
+      </details>
+      <!-- New route -->
+      <div style="background:var(--surf2);border:1px solid var(--border);border-radius:var(--r);padding:10px;margin-bottom:9px;">
+        <div class="sec" style="margin-top:0;">New Route</div>
+        <div class="fld"><label class="lbl">From</label><select class="inp" id="rf"></select></div>
+        <div class="fld"><label class="lbl">To</label><select class="inp" id="rt"></select></div>
+        <div class="fr2">
+          <div><label class="lbl">Mode</label>
+            <select class="inp" id="rm">
+              <option value="car">🚗 Car</option>
+              <option value="foot">🚶 Walk</option>
+              <option value="bike">🚲 Bike</option>
+              <option value="manual">✏️ Manual (straight)</option>
+            </select>
+          </div>
+          <div><label class="lbl">Day</label><select class="inp" id="rd"></select></div>
+        </div>
+        <div class="fr2">
+          <div><label class="lbl">Fixed cost ($)</label><input class="inp" id="r-cost" type="number" min="0" step=".01" placeholder="0.00"></div>
+          <div><label class="lbl">Manual dist. (km)</label><input class="inp" id="r-manual-dist" type="number" min="0" step=".1" placeholder="auto"></div>
+        </div>
+        <div class="fld">
+          <label class="lbl">Route color</label>
+          <div class="crow" id="rt-colors" style="margin-top:4px;">
+            <div class="csw on" style="background:#1d56d4" data-rc="#1d56d4"></div>
+            <div class="csw" style="background:#15803d" data-rc="#15803d"></div>
+            <div class="csw" style="background:#d4920a" data-rc="#d4920a"></div>
+            <div class="csw" style="background:#c81e1e" data-rc="#c81e1e"></div>
+            <div class="csw" style="background:#9333ea" data-rc="#9333ea"></div>
+            <div class="csw" style="background:#0e7eb5" data-rc="#0e7eb5"></div>
+            <div class="csw" style="background:#b01e6a" data-rc="#b01e6a"></div>
+            <div class="csw" style="background:#c94f14" data-rc="#c94f14"></div>
+          </div>
+        </div>
+        <button class="btn bb bfw" id="btn-calc">Calculate Route →</button>
+      </div>
+      <div class="sec"><span>Routes</span><span class="badge" id="rcnt">0</span><span class="sl"></span></div>
+      <div id="rlist"></div>
+    </div>
+  </div>
+
+  <!-- ── GPS ── -->
+  <div class="panel" id="panel-gps">
+    <div class="pbd">
+      <div class="gbar">
+        <div class="gdot" id="gdot"></div>
+        <div style="flex:1;"><div id="glbl" style="font-size:.79rem;font-weight:700;">GPS inactive</div><div id="gsub" style="font-size:.63rem;color:var(--muted);margin-top:1px;">Enable to track location</div></div>
+      </div>
+      <div style="display:flex;gap:5px;margin-bottom:9px;">
+        <button class="btn bgr bsm" id="btn-gon" style="flex:1;justify-content:center;">▶ Start GPS</button>
+        <button class="btn br bic bsm" id="btn-goff" disabled>■</button>
+      </div>
+      <div class="tog-row">
+        <div><div class="tog-label">🧲 Draw Close POIs</div><div class="tog-sub">Lines to POIs within 50 km</div></div>
+        <button class="tog" id="tog-lines" onclick="togglePoiLines()"></button>
+      </div>
+      <div style="font-size:.68rem;color:var(--muted);margin-bottom:9px;background:var(--surf2);border:1px solid var(--border);border-radius:var(--r);padding:8px;line-height:1.65;">📱 <b>Tip:</b> Keep this app alongside Google Maps.</div>
+      <div class="sec" style="margin-top:0;"><span>Nearby POIs</span><span class="sl"></span></div>
+      <div id="nearby"></div>
+    </div>
+  </div>
+
+  <!-- ── Save / Stats ── -->
+  <div class="panel" id="panel-save">
+    <div class="pbd">
+      <div class="sgrid">
+        <div class="sc"><div class="sv" id="stp">0</div><div class="sk">POIs</div></div>
+        <div class="sc"><div class="sv" id="str">0</div><div class="sk">Routes</div></div>
+        <div class="sc"><div class="sv" id="std">0</div><div class="sk">Days</div></div>
+        <div class="sc"><div class="sv" id="stkm">0</div><div class="sk">km total</div></div>
+        <div class="sc" style="grid-column:span 2;"><div class="sv gold" id="stcost">$0.00</div><div class="sk">💰 Total trip cost</div></div>
+      </div>
+      <div class="cost-breakdown">
+        <h4>💰 Cost breakdown</h4>
+        <div id="cost-breakdown-body"></div>
+      </div>
+      <div class="sec"><span>Google Drive</span><span class="sl"></span></div>
+      <div class="gdpanel">
+        <h3>☁️ Google Drive</h3>
+        <div id="gd-out">
+          <p style="font-size:.68rem;color:var(--muted);margin-bottom:7px;line-height:1.65;">Sign in with <b>your Google account</b> to save trips in your Drive (<code style="background:var(--surf3);padding:1px 4px;border-radius:3px;font-size:.62rem;">RoadTripPlanner</code> folder).</p>
+          <button class="btn bb bfw" id="btn-gsign" style="margin-bottom:7px;">Sign in with Google</button>
+          <details><summary style="font-size:.63rem;color:var(--muted);cursor:pointer;font-weight:700;">⚙️ Developer setup</summary>
+          <div style="background:rgba(212,146,10,.06);border:1px solid rgba(212,146,10,.18);border-radius:var(--rs);padding:8px;margin-top:5px;" class="gd-setup">
+            <ol>
+              <li>console.cloud.google.com → New project</li>
+              <li>Enable <b>Google Drive API</b> + <b>Identity API</b></li>
+              <li>Credentials → OAuth 2.0 Web Client → HTTPS domain</li>
+              <li>Replace <code>YOUR_CLIENT_ID</code> in app.js config</li>
+              <li>Host on HTTPS (GitHub Pages / Netlify = free)</li>
+            </ol>
+          </div></details>
+        </div>
+        <div id="gd-in" style="display:none;">
+          <div class="gd-user-row">
+            <div class="gd-av" id="gd-av">?</div>
+            <div style="flex:1;min-width:0;"><div id="gd-name" style="font-size:.74rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div><div id="gd-email" style="font-size:.61rem;color:var(--muted);"></div></div>
+            <button class="btn bg bsm" id="btn-gsout">Sign out</button>
+          </div>
+          <div style="display:flex;gap:5px;margin-bottom:7px;">
+            <button class="btn bb bsm" id="btn-gdsv" style="flex:1;justify-content:center;">☁️ Save</button>
+            <button class="btn bg bsm" id="btn-gdls" style="flex:1;justify-content:center;">📂 Load</button>
+          </div>
+          <div id="gd-files"></div>
+        </div>
+      </div>
+      <div class="sec"><span>Local file</span><span class="sl"></span></div>
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        <button class="btn ba bfw" id="btn-save">💾 Save JSON</button>
+        <button class="btn bg bfw" id="btn-load">📂 Load JSON</button>
+        <button class="btn bg bfw" id="btn-gpx">📡 Export GPX</button>
+        <button class="btn br bfw" id="btn-clr">🗑 Clear all</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Settings ── -->
+  <div class="panel" id="panel-settings">
+    <div class="pbd">
+      <div class="sec" style="margin-top:0;"><span>Map overlays</span><span class="sl"></span></div>
+      <div class="tog-row">
+        <div><div class="tog-label">🗺️ Day zone overlays</div><div class="tog-sub">Coloured hand-drawn regions per day</div></div>
+        <button class="tog" id="stog-day-zones" onclick="setSetting('showDayZones',!CFG.showDayZones)"></button>
+      </div>
+      <div class="tog-row" id="stog-zone-titles-row" style="opacity:.5;pointer-events:none;">
+        <div><div class="tog-label">🏷️ Day titles on zones</div><div class="tog-sub">Show day name inside each overlay</div></div>
+        <button class="tog on" id="stog-zone-titles" onclick="setSetting('showZoneTitles',!CFG.showZoneTitles)"></button>
+      </div>
+      <div class="tog-row">
+        <div><div class="tog-label">🏷️ POI labels on map</div><div class="tog-sub">Show name under every POI pin</div></div>
+        <button class="tog" id="stog-poi-labels" onclick="setSetting('showPoiLabels',!CFG.showPoiLabels)"></button>
+      </div>
+      <div class="tog-row">
+        <div><div class="tog-label">🕐 Hourly distance dots</div><div class="tog-sub">Small dot every 1 hr along routes</div></div>
+        <button class="tog on" id="stog-hour-dots" onclick="setSetting('showHourDots',!CFG.showHourDots)"></button>
+      </div>
+      <div class="tog-row">
+        <div><div class="tog-label">🔢 Day POI order lines</div><div class="tog-sub">Straight lines joining POIs in day order</div></div>
+        <button class="tog" id="stog-day-order-lines" onclick="setSetting('showDayOrderLines',!CFG.showDayOrderLines)"></button>
+      </div>
+
+      <div class="sec"><span>Display</span><span class="sl"></span></div>
+      <div class="tog-row" style="flex-wrap:wrap;gap:5px;">
+        <div style="flex:1;"><div class="tog-label">🔠 Interface font size</div><div class="tog-sub">Scales all drawer text (desktop only)</div></div>
+        <div style="display:flex;align-items:center;gap:7px;width:100%;padding-top:4px;">
+          <span style="font-size:.6rem;color:var(--muted);flex-shrink:0;">S</span>
+          <input type="range" id="font-scale-slider" min="80" max="150" step="5" value="125" style="flex:1;accent-color:var(--acc);" oninput="setFontScale(+this.value)">
+          <span style="font-size:.6rem;color:var(--muted);flex-shrink:0;">XL</span>
+          <span id="font-scale-val" style="font-size:.65rem;font-weight:700;color:var(--acc);min-width:30px;text-align:right;">125%</span>
+        </div>
+      </div>
+      <div class="tog-row">
+        <div><div class="tog-label">🌙 Dark mode</div><div class="tog-sub">Toggle light / dark theme</div></div>
+        <button class="tog" id="stog-dark" onclick="setTheme(document.documentElement.getAttribute('data-theme')!=='dark')"></button>
+      </div>
+
+      <div class="sec"><span>Behaviour</span><span class="sl"></span></div>
+      <div class="tog-row">
+        <div><div class="tog-label">📌 Pin drawer (desktop)</div><div class="tog-sub">Keeps panel open alongside map</div></div>
+        <button class="tog" id="stog-pin" onclick="togglePin()"></button>
+      </div>
+      <div class="tog-row">
+        <div><div class="tog-label">🛰️ Satellite base map</div><div class="tog-sub">Switch between street & satellite</div></div>
+        <button class="tog" id="stog-sat" onclick="toggleSat()"></button>
+      </div>
+    </div>
+  </div>
+</div><!-- /drawer -->
+
+<!-- POI Modal -->
+<div id="mbk"><div id="modal">
+  <h2><span id="m-ico">📍</span><span id="m-hd">New POI</span></h2>
+  <div class="fld"><label class="lbl">Name *</label><input class="inp" id="m-name" type="text" placeholder="Place name..."></div>
+  <div class="fld"><label class="lbl">Notes</label><textarea class="inp" id="m-desc" rows="3" placeholder="Opening hours, tips..."></textarea></div>
+  <div class="fr2">
+    <div><label class="lbl">Category</label>
+      <select class="inp" id="m-cat">
+        <option value="general">📍 General</option><option value="hotel">🏨 Hotel</option>
+        <option value="camping">⛺ Camping</option>
+        <option value="restaurant">🍽️ Restaurant</option><option value="attraction">🎯 Attraction</option>
+        <option value="hike">🥾 Hike</option><option value="view">🌄 Viewpoint</option>
+        <option value="gas">⛽ Gas</option><option value="parking">🅿️ Parking</option>
+        <option value="info">ℹ️ Info</option>
+      </select>
+    </div>
+    <div><label class="lbl">Rating</label>
+      <select class="inp" id="m-rat">
+        <option value="">—</option><option value="5">★★★★★</option><option value="4">★★★★☆</option>
+        <option value="3">★★★☆☆</option><option value="2">★★☆☆☆</option><option value="1">★☆☆☆☆</option>
+      </select>
+    </div>
+  </div>
+  <!-- Propagate to next day — shown only for hotel/camping -->
+  <div id="m-propagate-row" class="tog-row" style="display:none;margin-bottom:7px;border-radius:var(--rs);padding:7px 10px;background:rgba(29,86,212,.05);border:1px solid rgba(29,86,212,.15);">
+    <div><div class="tog-label" style="font-size:.68rem;">🔗 Show as start of next day</div><div class="tog-sub">Display this accommodation as a ghost entry at the top of the following day</div></div>
+    <input type="checkbox" id="m-propagate" checked style="accent-color:var(--acc);width:18px;height:18px;cursor:pointer;flex-shrink:0;">
+  </div>
+  <!-- Cost with per-day / per-total toggle -->
+  <div class="fr2">
+    <div>
+      <label class="lbl">Cost ($)</label>
+      <input class="inp" id="m-cost" type="number" min="0" step=".01" placeholder="0.00">
+    </div>
+    <div>
+      <label class="lbl">Cost type</label>
+      <div class="cost-type-toggle">
+        <button class="ctt-btn on" id="ctt-total" onclick="setCostType('total')">Total</button>
+        <button class="ctt-btn" id="ctt-perday" onclick="setCostType('perday')">Per day ×<span id="ctt-days-count">0</span></button>
+      </div>
+      <div id="ctt-computed" style="font-size:.62rem;color:var(--gold);margin-top:3px;font-weight:700;"></div>
+    </div>
+  </div>
+  <div class="fld">
+    <label class="lbl">Assign to Days</label>
+    <div id="m-days-list"><div style="font-size:.65rem;color:var(--muted);">No days yet.</div></div>
+    <select id="m-day" style="display:none;"></select>
+  </div>
+  <div class="fld"><label class="lbl">Color</label>
+    <div class="crow">
+      <div class="csw on" style="background:#c94f14" data-c="#c94f14"></div>
+      <div class="csw" style="background:#1d56d4" data-c="#1d56d4"></div>
+      <div class="csw" style="background:#15803d" data-c="#15803d"></div>
+      <div class="csw" style="background:#d4920a" data-c="#d4920a"></div>
+      <div class="csw" style="background:#7c22d4" data-c="#7c22d4"></div>
+      <div class="csw" style="background:#c81e1e" data-c="#c81e1e"></div>
+      <div class="csw" style="background:#0e7eb5" data-c="#0e7eb5"></div>
+      <div class="csw" style="background:#b01e6a" data-c="#b01e6a"></div>
+    </div>
+  </div>
+  <div class="fld"><label class="lbl">Links / URLs</label>
+    <div id="m-links"></div>
+    <button class="btn bg bsm" id="btn-alink" style="margin-top:4px;">+ Add link</button>
+  </div>
+  <div class="fld"><label class="lbl">Tags (comma separated)</label><input class="inp" id="m-tags" placeholder="museum, free..."></div>
+  <div class="mfoot"><button class="btn bg" id="m-cancel">Cancel</button><button class="btn ba" id="m-save">Save POI</button></div>
+</div></div>
+
+<!-- Route Edit Modal -->
+<div id="rmbk"><div id="rmodal">
+  <h2>✏️ Edit Route</h2>
+  <div class="fld"><label class="lbl">From</label><select class="inp" id="ref"></select></div>
+  <div class="fld"><label class="lbl">To</label><select class="inp" id="ret"></select></div>
+  <div class="fr2">
+    <div><label class="lbl">Mode</label>
+      <select class="inp" id="rem">
+        <option value="car">🚗 Car</option><option value="foot">🚶 Walk</option>
+        <option value="bike">🚲 Bike</option><option value="manual">✏️ Manual</option>
+      </select>
+    </div>
+    <div><label class="lbl">Day</label><select class="inp" id="red"></select></div>
+  </div>
+  <div class="fr2">
+    <div><label class="lbl">Fixed cost ($)</label><input class="inp" id="re-cost" type="number" min="0" step=".01" placeholder="0.00"></div>
+    <div><label class="lbl">Manual dist (km)</label><input class="inp" id="re-manual-dist" type="number" min="0" step=".1" placeholder="auto"></div>
+  </div>
+  <div class="fld">
+    <label class="lbl">Route color</label>
+    <div class="crow" id="re-colors" style="margin-top:4px;">
+      <div class="csw on" style="background:#1d56d4" data-rc2="#1d56d4"></div>
+      <div class="csw" style="background:#15803d" data-rc2="#15803d"></div>
+      <div class="csw" style="background:#d4920a" data-rc2="#d4920a"></div>
+      <div class="csw" style="background:#c81e1e" data-rc2="#c81e1e"></div>
+      <div class="csw" style="background:#9333ea" data-rc2="#9333ea"></div>
+      <div class="csw" style="background:#0e7eb5" data-rc2="#0e7eb5"></div>
+      <div class="csw" style="background:#b01e6a" data-rc2="#b01e6a"></div>
+      <div class="csw" style="background:#c94f14" data-rc2="#c94f14"></div>
+    </div>
+  </div>
+  <div class="mfoot"><button class="btn bg" id="re-cancel">Cancel</button><button class="btn bb" id="re-save">Recalculate &amp; Save</button></div>
+</div></div>
+
+<!-- Shift Days Modal -->
+<div id="shiftmbk" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px);padding:13px;">
+<div style="background:var(--surf);border:1px solid var(--border2);border-radius:var(--rl);padding:18px;width:100%;max-width:380px;box-shadow:var(--sh2);">
+  <h2 style="font-family:var(--head);font-weight:900;font-size:.94rem;margin-bottom:11px;">&#x1F4C5; Shift All Dates</h2>
+  <p style="font-size:.72rem;color:var(--muted);margin-bottom:10px;line-height:1.6;">Move all days forward or backward.</p>
+  <div class="fr2">
+    <div><label class="lbl">New start date</label><input class="inp" type="date" id="shift-start"></div>
+    <div><label class="lbl">Shift by (days)</label><input class="inp" type="number" id="shift-delta" placeholder="+9 or -3"></div>
+  </div>
+  <div id="shift-preview" style="font-size:.67rem;color:var(--muted);margin-bottom:8px;background:var(--surf2);border:1px solid var(--border);border-radius:var(--rs);padding:8px;display:none;max-height:140px;overflow-y:auto;line-height:1.8;"></div>
+  <div class="mfoot">
+    <button class="btn bg" id="shift-cancel">Cancel</button>
+    <button class="btn bg" id="shift-preview-btn">Preview</button>
+    <button class="btn ba" id="shift-apply">Apply</button>
+  </div>
+</div></div>
+
+<!-- Split Route Modal -->
+<div id="smbk" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px);padding:13px;">
+<div style="background:var(--surf);border:1px solid var(--border2);border-radius:var(--rl);padding:18px;width:100%;max-width:440px;max-height:92vh;overflow-y:auto;box-shadow:var(--sh2);">
+  <h2 style="font-family:var(--head);font-weight:900;font-size:.94rem;margin-bottom:11px;">&#x2702;&#xFE0F; Split Route</h2>
+  <p id="split-desc" style="font-size:.72rem;color:var(--muted);margin-bottom:10px;line-height:1.6;"></p>
+  <div class="fld"><label class="lbl">Split via existing POI</label><select class="inp" id="split-poi"><option value="">— Select a POI —</option></select></div>
+  <div style="text-align:center;font-size:.7rem;color:var(--muted);margin:6px 0;">— or —</div>
+  <div class="fld"><label class="lbl">New waypoint name</label><input class="inp" id="split-poi-name" type="text" placeholder="Waypoint"></div>
+  <button class="btn bg bfw" id="btn-split-map" style="margin-bottom:7px;">📍 Pick point on map</button>
+  <div id="split-map-pt" style="display:none;font-size:.68rem;color:var(--muted);background:var(--surf2);border:1px solid var(--border);border-radius:var(--rs);padding:6px;margin-bottom:7px;"></div>
+  <div class="mfoot">
+    <button class="btn bg" id="split-cancel">Cancel</button>
+    <button class="btn ba" id="split-do">Split Route</button>
+  </div>
+</div></div>
+
+<div id="toast"></div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* Sequential cache-busted module loader — guarantees execution order */
+(function(){
+  var ts = Date.now();
+  var cssLink = document.getElementById('app-css');
+  if(cssLink) cssLink.href = 'style.css?v='+ts;
+
+  var modules = ['config','ui','zones','visibility','pois','gps','events'];
+  var i = 0;
+  function loadNext(){
+    if(i >= modules.length) return;
+    var s = document.createElement('script');
+    s.src = modules[i++]+'.js?v='+ts;
+    s.onload = loadNext;   // load next only after this one has executed
+    document.body.appendChild(s);
+  }
+  // Wait for Leaflet to be ready before starting (it's loaded synchronously above)
+  loadNext();
+})();
+</script>
+
+<script>
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('./sw.js')
+      .then(r=>console.log('SW registered:', r.scope))
+      .catch(e=>console.warn('SW failed:', e));
+  });
+}
+</script>
+
+</body>
+</html>
