@@ -124,6 +124,7 @@
       <button class="btn bg bic bsm" onclick="setAllDaysCollapsed(false)" title="Expand all days" style="font-size:.82rem;font-weight:700;">+</button>
       <button class="btn bg bic bsm" onclick="setAllDaysCollapsed(true)" title="Collapse all days" style="font-size:.82rem;font-weight:700;">−</button>
     </div>
+    <div id="trip-overview" class="trip-overview"></div>
     <div class="pbd" id="day-list"></div>
   </div>
 
@@ -377,32 +378,16 @@
       <div class="csw" data-c="#0e7eb5"></div><div class="csw" data-c="#b01e6a"></div>
     </div>
   </div>
-  <!-- Assign to Days: compact + modal -->
+  <!-- Assign to Days: inline toggle chips -->
   <div class="fld">
     <label class="lbl">Assigned days</label>
-    <div style="display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap;">
-      <div id="m-days-badges" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;"></div>
-      <button class="btn bg bsm" onclick="openFormDaysModal()" style="font-size:.63rem;white-space:nowrap;">📅 Edit</button>
-    </div>
-    <!-- Hidden checkboxes read by getSelectedDayIds() -->
-    <div id="m-days-list" style="display:none;"></div>
-    <select id="m-day" style="display:none;"></select>
+    <div id="m-days-chips" class="day-chip-row"></div>
   </div>
   <!-- Hidden fields kept for save logic (rating, tags, links preserved in data) -->
   <select id="m-rat" style="display:none;"></select>
   <input id="m-tags" style="display:none;">
   <div id="m-links" style="display:none;"></div>
   <div class="mfoot"><button class="btn bg" id="m-cancel">Cancel</button><button class="btn ba" id="m-save">Save POI</button></div>
-</div></div>
-
-<!-- Form Days Modal (for POI edit form) -->
-<div id="form-days-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1200;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:13px;" onclick="if(event.target===this)closeFormDaysModal()">
-<div style="background:var(--surf);border:1px solid var(--border2);border-radius:var(--rl);padding:16px;width:100%;max-width:320px;box-shadow:var(--sh2);">
-  <h2 style="font-family:var(--head);font-weight:900;font-size:.9rem;margin-bottom:10px;">📅 Assign to days</h2>
-  <div id="form-days-list" style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto;"></div>
-  <div style="display:flex;justify-content:flex-end;margin-top:12px;">
-    <button class="btn ba" onclick="closeFormDaysModal()">OK</button>
-  </div>
 </div></div>
 
 <!-- Form Color Picker Modal -->

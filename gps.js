@@ -21,18 +21,34 @@ function pickSR(lat,lon,name){ qs('#srdr').style.display='none'; qs('#psrch').va
 /* ===================================================
    MODAL
 =================================================== */
-function refMDay(){ const o='<option value="">— Not assigned —</option>'+S.days.map(d=>'<option value="'+d.id+'">'+esc(d.title)+(d.date?' ('+d.date+')':'')+'</option>').join(''); const mdEl=qs('#m-day'); if(mdEl) mdEl.innerHTML=o; }
-function renderMDayCheckboxes(selectedIds){
-  const el=qs('#m-days-list'); if(!el) return;
-  if(!S.days.length){ el.innerHTML=''; updateDayBadges(); return; }
+function renderDayChips(selectedIds){
+  const el=qs('#m-days-chips'); if(!el) return;
+  if(!S.days.length){ el.innerHTML='<span style="font-size:.63rem;color:var(--muted);">No days yet — add one in the Days tab.</span>'; return; }
   el.innerHTML=S.days.map((d,di)=>{
-    const checked=selectedIds.includes(d.id)?'checked':'';
+    const on=selectedIds.includes(d.id);
     const c=d.color||DAY_ZONE_COLORS[di%DAY_ZONE_COLORS.length];
-    return'<label class="mday-row" style="display:none;"><input type="checkbox" value="'+d.id+'" '+checked+' onchange="updateCostTypeUI();updateDayBadges()"></label>';
+    const fd=fmtDate(d.date);
+    return '<button type="button" class="day-chip'+(on?' on':'')+'" data-did="'+d.id+'" style="'+(on?'background:'+c+';border-color:'+c+';':'')+'" onclick="toggleFormDayChip('+d.id+')">'
+      +'<span class="day-chip-title">'+esc(d.title)+'</span>'
+      +(fd?'<span class="day-chip-date">'+fd+'</span>':'')
+      +'</button>';
   }).join('');
-  updateCostTypeUI(); updateDayBadges();
+  updateCostTypeUI();
 }
-function getSelectedDayIds(){ return qsa('#m-days-list input[type=checkbox]:checked').map(cb=>Number(cb.value)); }
+function toggleFormDayChip(dayId){
+  const chip=qs('#m-days-chips .day-chip[data-did="'+dayId+'"]'); if(!chip) return;
+  const willBeOn=!chip.classList.contains('on');
+  chip.classList.toggle('on',willBeOn);
+  if(willBeOn){
+    const di=S.days.findIndex(d=>d.id===dayId);
+    const c=(S.days[di]&&S.days[di].color)||DAY_ZONE_COLORS[di%DAY_ZONE_COLORS.length];
+    chip.style.background=c; chip.style.borderColor=c;
+  } else {
+    chip.style.background=''; chip.style.borderColor='';
+  }
+  updateCostTypeUI();
+}
+function getSelectedDayIds(){ return qsa('#m-days-chips .day-chip.on').map(c=>Number(c.dataset.did)); }
 
 // Cost type toggle
 function setCostType(type){
@@ -58,11 +74,10 @@ function openModal(ll,name){
     qs('#m-name').value=name||''; qs('#m-desc').value=''; qs('#m-cat').value='general';
     qs('#m-cost').value='';
     selCol('#c94f14'); qs('#m-hd').textContent='New POI'; qs('#m-ico').textContent='📍';
-    setCostType('total'); renderMDayCheckboxes([]);
+    setCostType('total'); renderDayChips([]);
     const propRow=qs('#m-propagate-row'); if(propRow) propRow.style.display='none';
     const propCb=qs('#m-propagate'); if(propCb) propCb.checked=true;
   }
-  refMDay();
   qs('#mbk').classList.add('on'); setTimeout(()=>qs('#m-name').focus(),80);
 }
 function closeModal(){ qs('#mbk').classList.remove('on'); S.editing=null; restoreDrawer(); }
@@ -88,32 +103,6 @@ function openFormColorPicker(){
 function applyFormColor(c){ selCol(c); qs('#form-cpick-hex').value=c; qs('#form-cpick-swatches').querySelectorAll('.cpick-swatch').forEach(s=>s.classList.toggle('cpick-on',s.style.background===c||s.style.backgroundColor===c)); }
 function closeFormColorPicker(){ const m=qs('#form-cpick-modal'); if(m) m.style.display='none'; }
 
-function updateDayBadges(){
-  const badges=qs('#m-days-badges'); if(!badges) return;
-  const ids=getSelectedDayIds();
-  if(!ids.length){ badges.innerHTML='<span style="font-size:.63rem;color:var(--muted);">No day assigned</span>'; return; }
-  badges.innerHTML=ids.map(id=>{ const d=S.days.find(x=>x.id===id); if(!d) return''; const di=S.days.indexOf(d); const c=d.color||DAY_ZONE_COLORS[di%DAY_ZONE_COLORS.length]; return'<span style="background:'+c+';color:#fff;border-radius:8px;padding:1px 7px;font-size:.6rem;font-weight:700;">'+esc(d.title)+'</span>'; }).join('');
-}
-function openFormDaysModal(){
-  const m=qs('#form-days-modal'); if(!m) return;
-  const selectedIds=getSelectedDayIds();
-  qs('#form-days-list').innerHTML=S.days.map((d,di)=>{
-    const checked=selectedIds.includes(d.id)?'checked':'';
-    const c=d.color||DAY_ZONE_COLORS[di%DAY_ZONE_COLORS.length];
-    const fd=fmtDate(d.date);
-    return'<label class="dayassign-row">'
-      +'<input type="checkbox" value="'+d.id+'" '+checked+' style="accent-color:'+c+';cursor:pointer;width:16px;height:16px;" onchange="syncFormDay('+d.id+',this.checked)">'
-      +'<span class="dayassign-dot" style="background:'+c+';"></span>'
-      +'<span class="dayassign-name">'+esc(d.title)+(fd?' <span style="color:var(--muted2);font-size:.6rem;">'+fd+'</span>':'')+'</span>'
-      +'</label>';
-  }).join('');
-  m.style.display='flex';
-}
-function syncFormDay(dayId, checked){
-  const cb=qs('#m-days-list input[type=checkbox][value="'+dayId+'"]'); if(cb) cb.checked=checked;
-  updateCostTypeUI(); updateDayBadges();
-}
-function closeFormDaysModal(){ const m=qs('#form-days-modal'); if(m) m.style.display='none'; updateDayBadges(); }
 function selRtColAuto(){ qsa('.csw[data-rc]').forEach(s=>s.classList.remove('on')); }
 function selRtCol2Auto(){ qsa('.csw[data-rc2]').forEach(s=>s.classList.remove('on')); }
 function renderLinks(links){ const el=qs('#m-links'); el.innerHTML=''; (links.length?links:[{label:'',url:''}]).forEach(lk=>{ const row=document.createElement('div'); row.className='lrow'; row.innerHTML='<input class="inp" style="width:76px;flex-shrink:0;" placeholder="Label" value="'+(lk.label||'')+'"><input class="inp" style="flex:1;" placeholder="https://..." value="'+(lk.url||'')+'"><button class="btn br bic bsm" onclick="this.parentNode.remove()">✕</button>'; el.appendChild(row); }); }

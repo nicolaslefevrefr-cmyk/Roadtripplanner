@@ -147,7 +147,7 @@ function editPOI(id){
   if(p.colorLocked) selCol(p.color); else { S.col=p.color; selColAuto(); }
   qs('#m-hd').textContent='Edit POI'; qs('#m-ico').textContent=CATS[p.cat]||'📍';
   setCostType(p.costType||'total');
-  refMDay(); renderMDayCheckboxes(p.dayIds||[]);
+  renderDayChips(p.dayIds||[]);
   updateCostTypeUI();
   const propRow=qs('#m-propagate-row');
   if(propRow){ propRow.style.display=isAccomCat(p.cat)?'flex':'none'; }
@@ -388,8 +388,37 @@ function focusDay(did){
   closeDrawerMobile(); map.fitBounds(L.latLngBounds(lls),{padding:[50,50]});
 }
 
+// Compact, scrollable day-by-day summary: where you are / sleep each day, at a glance.
+function renderTripOverview(){
+  const el=qs('#trip-overview'); if(!el) return;
+  if(!S.days.length){ el.innerHTML=''; return; }
+  el.innerHTML='<div class="ov-scroll">'+S.days.map((d,di)=>{
+    const fd=fmtDate(d.date);
+    const zoneColor=d.color||DAY_ZONE_COLORS[di%DAY_ZONE_COLORS.length];
+    // Where you sleep: an accommodation POI assigned this day, or one carried over (ghost) from the previous day
+    let stay=null;
+    const ownAccom=d.items.filter(i=>i.type==='poi').map(i=>S.pois.find(p=>p.id===i.id)).find(p=>p&&isAccomCat(p.cat));
+    if(ownAccom) stay=ownAccom;
+    else{ const ghosts=getGhostItemsForDay(di); if(ghosts.length){ const gp=S.pois.find(p=>p.id===ghosts[0].poiId); if(gp) stay=gp; } }
+    const dc=dayCost(d);
+    return '<div class="ov-card" style="--ov-col:'+zoneColor+';" onclick="scrollToDay('+d.id+')">'
+      +'<div class="ov-top"><span class="ov-daynum" style="background:'+zoneColor+';">'+(di+1)+'</span><span class="ov-date">'+(fd||'No date')+'</span></div>'
+      +'<div class="ov-title">'+esc(d.title)+'</div>'
+      +(stay?'<div class="ov-stay">'+(CATS[stay.cat]||'🏨')+' '+esc(stay.name)+'</div>':'<div class="ov-stay ov-stay--none">🚫 No stay set</div>')
+      +(dc?'<div class="ov-cost">$'+dc.toFixed(2)+'</div>':'')
+      +'</div>';
+  }).join('')+'</div>';
+}
+function scrollToDay(id){
+  const card=qs('.dayc[data-dcid="'+id+'"]'); if(!card) return;
+  card.scrollIntoView({behavior:'smooth',block:'start'});
+  card.classList.add('dayc--flash');
+  setTimeout(()=>card.classList.remove('dayc--flash'),900);
+}
+
 function renderDays(){
   const el=qs('#day-list');
+  renderTripOverview();
   if(!S.days.length){ el.innerHTML='<div style="font-size:.73rem;color:var(--muted);padding:10px;text-align:center;">No days yet.</div>'; return; }
   const insertBtn=(idx)=>'<div class="day-insert-btn"><button onclick="insertDayAt('+idx+')">＋ Insert day here</button></div>';
   el.innerHTML=insertBtn(0)+S.days.map((d,di)=>{
@@ -469,11 +498,11 @@ function renderDays(){
       +'<div class="dayn-bubble" data-did="'+d.id+'" style="background:'+zoneColor+';cursor:pointer;" title="Click to change day color" onclick="qs(\'#dclr-'+d.id+'\').click()">'+(di+1)+'</div>'
       +'<input type="color" id="dclr-'+d.id+'" value="'+zoneColor+'" style="display:none;width:0;height:0;padding:0;border:0;" oninput="setDayColor('+d.id+',this.value)">'
       +'<div class="dayh-titles">'
-      +'<input class="dayti" value="'+esc(d.title)+'" onchange="updDay('+d.id+',\'title\',this.value)">'
       +'<div class="daydi-wrap">'
-      +'<span class="daydi-label">'+(fdate||'📅 Set date')+'</span>'
+      +'<span class="daydi-label" style="background:'+zoneColor+'20;color:'+zoneColor+';border-color:'+zoneColor+'66;">'+(fdate||'📅 Set date')+'</span>'
       +'<input class="daydi" type="date"'+(d.date?' value="'+d.date+'"':'')+' onchange="updDay('+d.id+',\'date\',this.value)" title="Edit date">'
       +'</div>'
+      +'<input class="dayti" value="'+esc(d.title)+'" onchange="updDay('+d.id+',\'title\',this.value)">'
       +'</div>'
       +hotelWarn
       +'<div class="day-reorder-btns">'
