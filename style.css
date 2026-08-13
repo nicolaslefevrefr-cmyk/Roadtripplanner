@@ -237,6 +237,9 @@ textarea.inp{resize:vertical;min-height:50px;line-height:1.5;}
 .daydi::-webkit-calendar-picker-indicator{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;}
 .dayc--collapsed .dayst,.dayc--collapsed .dayb{display:none;}
 .dayc--collapsed .dayh{border-bottom:none;}
+.day-reorder-btns{display:flex;flex-direction:column;gap:1px;flex-shrink:0;}
+.day-reorder-btns .btn{height:14px;line-height:1;min-height:0;}
+.day-reorder-btns .btn:disabled{opacity:.25;cursor:default;}
 .day-collapse-btn{background:none;border:1px solid var(--border2);border-radius:6px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--muted);font-size:1rem;font-weight:400;line-height:1;flex-shrink:0;transition:all .14s;padding:0;}
 .day-collapse-btn:hover{background:var(--surf);color:var(--text);}
 .day-hotel-warn{font-size:.8rem;flex-shrink:0;opacity:.75;cursor:default;}

@@ -151,7 +151,7 @@
           </div>
           <div class="fld">
             <label class="lbl">Default per day ($)</label>
-            <input class="inp" id="eating-default" type="number" min="0" step="1" placeholder="0" oninput="applyEatingDefault(+this.value)">
+            <input class="inp" id="eating-default" type="text" inputmode="decimal" placeholder="0" oninput="applyEatingDefault(+this.value.replace(',','.'))">
           </div>
           <div class="resto-total" id="eating-total">Total eating budget: <b>$0.00</b></div>
         </div>

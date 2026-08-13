@@ -331,6 +331,45 @@ function delDay(id){
   }
   ra();
 }
+// Move a day earlier (dir=-1) or later (dir=+1) relative to its neighbor.
+// The calendar date stays attached to its position in the trip (day 1's date,
+// day 2's date, etc. never change), while the CONTENT of the day (title, items,
+// POI assignments, color, hotel...) travels with it — so moving a day is really
+// "swap what happens on these two calendar days". Ghost/hotel carry-over
+// (getGhostItemsForDay) is index-based so it's automatically kept consistent.
+function moveDay(id, dir){
+  const idx = S.days.findIndex(x=>x.id===id);
+  if(idx===-1) return;
+  const swapIdx = idx+dir;
+  if(swapIdx<0 || swapIdx>=S.days.length) return;
+
+  const a = S.days[idx], b = S.days[swapIdx];
+
+  const hasAccom = d => (d.items||[]).some(it=>{
+    if(it.type!=='poi') return false;
+    const p = S.pois.find(x=>x.id===it.id);
+    return p && isAccomCat(p.cat);
+  });
+  const warn = hasAccom(a) || hasAccom(b);
+
+  // Dates belong to the slot: swap them so each day keeps the date matching its new position
+  const tmpDate = a.date;
+  a.date = b.date;
+  b.date = tmpDate;
+
+  // Keep auto-generated "Day N" titles in sync with the new position (custom titles are left alone)
+  if(a.title==='Day '+(idx+1)) a.title='Day '+(swapIdx+1);
+  if(b.title==='Day '+(swapIdx+1)) b.title='Day '+(idx+1);
+
+  S.days[idx]=b; S.days[swapIdx]=a;
+
+  ra();
+  if(warn) toast('⚠️ Un hébergement (hôtel/camping) est concerné — vérifie que les dates de réservation restent cohérentes après ce changement d\'ordre.','');
+  else toast('Jours réordonnés','ok');
+}
+function moveDayUp(id){ moveDay(id,-1); }
+function moveDayDown(id){ moveDay(id,1); }
+
 function rmItem(did,idx){
   const d=S.days.find(x=>x.id===did); if(!d) return;
   const it=d.items[idx];
@@ -437,6 +476,10 @@ function renderDays(){
       +'</div>'
       +'</div>'
       +hotelWarn
+      +'<div class="day-reorder-btns">'
+        +'<button class="btn bg bic bsm" onclick="moveDayUp('+d.id+')" title="Move day earlier"'+(di===0?' disabled':'')+' style="font-size:.7rem;padding:2px 5px;">▲</button>'
+        +'<button class="btn bg bic bsm" onclick="moveDayDown('+d.id+')" title="Move day later"'+(di===S.days.length-1?' disabled':'')+' style="font-size:.7rem;padding:2px 5px;">▼</button>'
+      +'</div>'
       +'<button class="day-collapse-btn" onclick="toggleDayCollapse('+d.id+')" title="'+(collapsed?'Expand':'Collapse')+'">'+(collapsed?'+':'−')+'</button>'
       +'<button class="btn bg bic bsm" onclick="setDayVisibility('+d.id+','+(hidden?'true':'false')+')" title="'+(hidden?'Show day':'Hide day')+'" style="font-size:.85rem;">'+(hidden?'👁':'👁‍🗨')+'</button>'
       +'<button class="btn br bic bsm" onclick="delDay('+d.id+')">✕</button></div>'
@@ -444,9 +487,9 @@ function renderDays(){
       +'<div class="dayb">'+items+costSummary
       +'<div style="display:flex;align-items:center;gap:5px;padding:4px 2px 2px;">'
         +'<span style="font-size:.62rem;color:var(--green);font-weight:700;">🍽️ Eating:</span>'
-        +'<input type="number" class="inp day-eating-input" min="0" step="1" data-did="'+d.id+'" placeholder="'+eatPlaceholder+'" style="width:90px;padding:2px 5px;font-size:.65rem;" '
+        +'<input type="text" inputmode="decimal" class="inp day-eating-input" data-did="'+d.id+'" placeholder="'+eatPlaceholder+'" style="width:90px;padding:2px 5px;font-size:.65rem;" '
           +(eatingOverridden?'value="'+S.eatingBudgets[d.id]+'"':'')+' '
-          +'oninput="setDayEating('+d.id+',+this.value,this.value!==\'\');" '
+          +'oninput="setDayEating('+d.id+',+this.value.replace(\',\',\'.\'),this.value!==\'\');" '
           +'onblur="if(this.value===\'\'){setDayEating('+d.id+',0,false);}">'
         +(eatingOverridden?'<button class="btn bg bsm" onclick="setDayEating('+d.id+',0,false);ra();" title="Reset to default">↩</button>':'')
       +'</div>'
